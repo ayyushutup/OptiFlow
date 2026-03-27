@@ -2,6 +2,8 @@ import sys
 import os
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 
+import numpy
+
 import config
 from simulation.sim_runner import SimRunner
 from agents.coordination import CoordinationManager  # pyre-ignore[21]
@@ -51,28 +53,29 @@ class TrafficEnv:
         return next_states, rewards, done
 
     def _get_state(self, intersection):
-        """Translates real simulation measurements into a simplified state for the Q-Table."""
+        """Translates real simulation measurements into a normalized tensor state for the DQN."""
         q = intersection.get_queue_lengths()
         neighbor_load = self.coordinator.get_neighbor_load(intersection)
         
-        # We divide queue lengths by 3 to create "bins" (e.g. queue of 4 and 5 are both bin '1').
-        # This keeps the Q-Table small enough to learn quickly.
-        state = (
-            min(q["N"], config.LANE_CAPACITY) // 3,
-            min(q["S"], config.LANE_CAPACITY) // 3,
-            min(q["E"], config.LANE_CAPACITY) // 3,
-            min(q["W"], config.LANE_CAPACITY) // 3,
-            intersection.signal.current_phase,
-            min(neighbor_load, 15) // 3
-        )
-        return state
+        cap = float(config.LANE_CAPACITY)
+        state = [
+            min(q["N"], cap) / cap,
+            min(q["S"], cap) / cap,
+            min(q["E"], cap) / cap,
+            min(q["W"], cap) / cap,
+            float(intersection.signal.current_phase),
+            float(intersection.signal.is_yellow),
+            min(neighbor_load, 15.0) / 15.0
+        ]
+        import numpy as np
+        return np.array(state, dtype=np.float32)
 
     def _get_reward(self, intersection):
         """Calculates the penalty based on traffic conditions."""
         wait_time = intersection.get_total_waiting_time()
         queues = intersection.get_queue_lengths()
-        max_q = max(queues.values()) if queues.values() else 0
+        total_q = sum(queues.values())
         
-        # Negative reward pushes the agent to minimize waiting time and queue length
-        reward = - (0.5 * wait_time) - (0.3 * max_q)
+        # Heavy penalty for standing queues and total wait times
+        reward = - (0.5 * wait_time) - (1.0 * total_q)
         return reward
