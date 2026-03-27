@@ -1,7 +1,7 @@
 import sys
 import os
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
-import config
+import config  # pyre-ignore[21]
 from collections import deque
 
 class Lane:
@@ -63,7 +63,7 @@ class Road:
 
 
 if __name__ == "__main__":
-    from vehicle import Vehicle
+    from vehicle import Vehicle  # pyre-ignore[21]
 
     # --- Test Lane ---
     print("=== Lane Test ===")

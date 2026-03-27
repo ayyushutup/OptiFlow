@@ -54,7 +54,18 @@ class TrafficSignal:
         return []
 
     def __repr__(self):
-        return f"Signal(phase={self.current_phase}, timer={self.timer}, yellow={self.is_yellow})"   
+        return f"Signal(phase={self.current_phase}, timer={self.timer}, yellow={self.is_yellow})" 
+
+    def process_action(self, action):
+        #Process an RL action:
+        if self.is_yellow:
+            self.tick()
+        else:
+            if action == 1:
+                self.is_yellow = True
+                self.timer = self.yellow_duration
+            else:
+                pass               
 
 
 if __name__ == "__main__":

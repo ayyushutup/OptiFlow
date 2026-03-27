@@ -3,9 +3,9 @@ import os
 import random
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 
-import config
-from city_grid import CityGrid
-from vehicle import Vehicle
+import config  # pyre-ignore[21]
+from city_grid import CityGrid  # pyre-ignore[21]
+from vehicle import Vehicle  # pyre-ignore[21]
 
 import json
 

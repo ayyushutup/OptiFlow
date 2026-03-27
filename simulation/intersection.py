@@ -2,8 +2,8 @@ import sys
 import os
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 
-from traffic_signal import TrafficSignal
-from road import Lane
+from traffic_signal import TrafficSignal  # pyre-ignore[21]
+from road import Lane  # pyre-ignore[21]
 
 class Intersection:
     def __init__(self, intersection_id, position):
@@ -37,14 +37,17 @@ class Intersection:
         """Vehicle arrives at intersection from `direction` and enters queue"""
         return self.incoming_lanes[direction].add_vehicle(vehicle)
 
-    def tick(self):
+    def tick(self, rl_action=None):
         """
         Move time forward:
-        1. Tick the traffic signal
+        1. Tick the traffic signal (or process RL action)
         2. Process green lanes and move vehicles through
         """
         # Update signal phase
-        self.signal.tick()
+        if rl_action is not None:
+            self.signal.process_action(rl_action)
+        else:
+            self.signal.tick()
         
         # Find who has a green light right now
         green_dirs = self.signal.get_green_directions()
@@ -100,8 +103,8 @@ class Intersection:
 
 
 if __name__ == "__main__":
-    from vehicle import Vehicle
-    from road import Road
+    from vehicle import Vehicle  # pyre-ignore[21]
+    from road import Road  # pyre-ignore[21]
     
     print("=== Intersection Test ===")
     i1 = Intersection("A", (0,0))

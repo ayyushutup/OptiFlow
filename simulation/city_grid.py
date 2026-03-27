@@ -2,9 +2,9 @@ import sys
 import os
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 
-import config
-from intersection import Intersection
-from road import Road
+import config  # pyre-ignore[21]
+from intersection import Intersection  # pyre-ignore[21]
+from road import Road  # pyre-ignore[21]
 
 class CityGrid:
     def __init__(self):
@@ -20,14 +20,14 @@ class CityGrid:
         Builds the grid of intersections and connects them with roads.
         """
         # 1. Create all intersections
-        intersection_id = 0
+        intersection_id: int = 0
         for r in range(self.rows):
             for c in range(self.cols):
                 self.intersections[(r, c)] = Intersection(intersection_id, (r, c))
-                intersection_id += 1
+                intersection_id += 1  # pyre-ignore[58]
 
         # 2. Connect intersections with roads
-        # We need a road in both directions between adjacent intersections
+        # We need a road in both directions between adjacent intersections, and exit roads at the boundaries
         for r in range(self.rows):
             for c in range(self.cols):
                 current = self.intersections[(r, c)]
@@ -49,6 +49,13 @@ class CityGrid:
                     road_to_west.to_intersection = current
                     east_neighbor.set_outgoing_road("W", road_to_west)
                     self.roads.append(road_to_west)
+                else:
+                    # East Edge Exit Road
+                    exit_road = Road()
+                    exit_road.from_intersection = current
+                    exit_road.to_intersection = None
+                    current.set_outgoing_road("E", exit_road)
+                    self.roads.append(exit_road)
 
                 # Check Bottom neighbor (South)
                 if r < self.rows - 1:
@@ -67,6 +74,29 @@ class CityGrid:
                     road_to_north.to_intersection = current
                     south_neighbor.set_outgoing_road("N", road_to_north)
                     self.roads.append(road_to_north)
+                else:
+                    # South Edge Exit Road
+                    exit_road = Road()
+                    exit_road.from_intersection = current
+                    exit_road.to_intersection = None
+                    current.set_outgoing_road("S", exit_road)
+                    self.roads.append(exit_road)
+                    
+                # West Edge Exit Road
+                if c == 0:
+                    exit_road = Road()
+                    exit_road.from_intersection = current
+                    exit_road.to_intersection = None
+                    current.set_outgoing_road("W", exit_road)
+                    self.roads.append(exit_road)
+                    
+                # North Edge Exit Road
+                if r == 0:
+                    exit_road = Road()
+                    exit_road.from_intersection = current
+                    exit_road.to_intersection = None
+                    current.set_outgoing_road("N", exit_road)
+                    self.roads.append(exit_road)
 
     def get_intersections(self):
         """Return list of all intersections"""
