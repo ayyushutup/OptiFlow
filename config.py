@@ -36,3 +36,10 @@ TRAIN_EPISODES = 500
 BATCH_SIZE = 64
 MEMORY_SIZE = 10000
 TARGET_UPDATE_FREQ = 10
+
+# ---RUNTIME SETTINGS (overridden by CLI args in main.py)---
+BACKEND = 'grid'   # 'grid' or 'sumo'
+VISUALIZE = False
+
+# ---MODEL PERSISTENCE---
+MODEL_DIR = 'models'   # directory to save/load trained agent weights
