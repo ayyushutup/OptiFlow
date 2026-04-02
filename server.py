@@ -1,17 +1,19 @@
 import sys
 import os
-sys.path.append(os.path.join(os.path.dirname(__file__), 'simulation'))
-
 import asyncio
 import json
+import numpy as np
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 import config
-from agents.traffic_env import TrafficEnv
-from agents.dqn_agent import DQNAgent
-from fastapi.middleware.cors import CORSMiddleware
+from agents.map_engine import MapEngine
 
-app = FastAPI(title="OptiFlow PyTorch WebSocket Controller")
+# Ensure simulation/agents paths are available
+sys.path.append(os.path.join(os.path.dirname(__file__), 'simulation'))
+sys.path.append(os.path.join(os.path.dirname(__file__), 'agents'))
+
+app = FastAPI(title="OptiFlow Real-World Backend")
 
 app.add_middleware(
     CORSMiddleware,
@@ -20,90 +22,123 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-class SimulationManager:
-    def __init__(self):
-        self.env = TrafficEnv()
-        self.states = self.env.reset()
-        
-        state_size = len(list(self.states.values())[0])
-        action_size = getattr(config, 'NUM_PHASES', 2)
-        
-        self.agents = {}
-        for inter in self.env.agent_intersections:
-            # We instantiate standard evaluation agents
-            agent = DQNAgent(state_size, action_size)
-            # Freeze exploration since we just want to watch them perform
-            agent.epsilon = 0.0  
-            self.agents[inter.id] = agent
-            
-    def tick(self):
-        actions = {}
-        for agent_id, agent in self.agents.items():
-            actions[agent_id] = agent.choose_action(self.states[agent_id], evaluate=True)
-            
-        next_states, rewards, done = self.env.step(actions)
-        self.states = next_states
-        
-        return self._serialize_state()
+# Global map engine
+map_engine = MapEngine(location="Mumbai, India", dist=1000)
+# Fetching map data (blocking for first time, but we'll optimize with cache later)
+map_engine.fetch_map()
+real_network = map_engine.get_serializable_network()
 
-    def _serialize_state(self):
-        """Massages the complex Python OOP models into a lightweight JSON schema for React"""
-        intersections = []
-        for (r,c), inter in self.env.grid.intersections.items():
-            intersections.append({
-                "id": inter.id,
-                "r": r, "c": c,
-                "is_yellow": inter.signal.is_yellow,
-                "green_dirs": inter.signal.get_green_directions()
-            })
+class RealSimManager:
+    """Manages continuous traffic simulation on a real-world graph."""
+    def __init__(self, network):
+        self.network = network
+        self.nodes = network['nodes']
+        self.edges = network['edges']
+        self.vehicles = []
+        self.signals = {}
+        self.step_count = 0
+        
+        # Initialize some signals (randomly for now)
+        for node in self.nodes:
+            if node['id'] % 3 == 0: # 33% intersections have signals
+                self.signals[node['id']] = {
+                    "state": "green",
+                    "green_dirs": ["NS"], # Placeholder
+                    "is_yellow": False,
+                    "timer": 0
+                }
+
+    def spawn_vehicle(self):
+        """Spawns a vehicle on a random edge."""
+        edge = np.random.choice(self.edges)
+        self.vehicles.append({
+            "id": f"v_{len(self.vehicles)}_{np.random.randint(1000)}",
+            "from": edge['from'],
+            "to": edge['to'],
+            "pos": 0,
+            "length": edge['length'],
+            "speed": np.random.uniform(5, 15) # m/s
+        })
+
+    def tick(self):
+        """Simulation physics step."""
+        self.step_count += 1
+        
+        # Spawn logic
+        if np.random.rand() < 0.2 and len(self.vehicles) < 50:
+            self.spawn_vehicle()
             
-        vehicles = []
-        for road in self.env.grid.roads:
-            from_id = road.from_intersection.id if road.from_intersection else None
-            to_id = road.to_intersection.id if road.to_intersection else None
-            for v in road.vehicles:
-                vehicles.append({
-                    "id": id(v),
-                    "pos": v.position,
-                    "length": config.ROAD_LENGTH,
-                    "from": from_id,
-                    "to": to_id
-                })
+        # Move vehicles
+        active_vehicles = []
+        total_waiting_time = 0
+        for v in self.vehicles:
+            v['pos'] += v['speed'] * 0.1 # 0.1s steps for smoothness
+            
+            if v['pos'] >= v['length']:
+                # Reached intersection - for now, just teleport to a new random edge
+                # (In Phase 3 we'll use actual pathfinding)
+                edge = np.random.choice(self.edges)
+                v['from'] = edge['from']
+                v['to'] = edge['to']
+                v['pos'] = 0
+                v['length'] = edge['length']
+            
+            active_vehicles.append(v)
+            
+        self.vehicles = active_vehicles
         
-        metrics = self.env.sim.metrics[-1] if self.env.sim.metrics else {}
-        
+        return self._serialize()
+
+    def _serialize(self):
         return {
-            "intersections": intersections,
-            "vehicles": vehicles,
-            "metrics": metrics,
-            "config": {
-                "rows": config.GRID_ROWS,
-                "cols": config.GRID_COLS
+            "intersections": [
+                {
+                    "id": sid, 
+                    "green_dirs": s['green_dirs'], 
+                    "is_yellow": s['is_yellow'],
+                    "lat": next(n['lat'] for n in self.nodes if n['id'] == sid),
+                    "lon": next(n['lon'] for n in self.nodes if n['id'] == sid)
+                } for sid, s in self.signals.items()
+            ],
+            "vehicles": [
+                {
+                    "id": v['id'],
+                    "from": v['from'],
+                    "to": v['to'],
+                    "pos": v['pos'],
+                    "length": v['length']
+                } for v in self.vehicles
+            ],
+            "metrics": {
+                "step": self.step_count,
+                "active_vehicles": len(self.vehicles),
+                "total_queued": sum(1 for v in self.vehicles if v['pos'] < 2),
+                "total_waiting_time": self.step_count * 0.5 # placeholder
             }
         }
 
-sim_manager = SimulationManager()
+sim_manager = RealSimManager(real_network)
+
+@app.get("/map")
+async def get_map():
+    """Retrieve the static road network."""
+    return real_network
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
     try:
-        print("React Frontend Connected!")
+        print("[Server] WebSocket Connection Established.")
         while True:
-            # Generate next simulation frame
-            data = sim_manager.tick()
-            
-            # Broadcast the entire physics universe as JSON
-            await websocket.send_text(json.dumps(data))
-            
-            # Target 20 FPS broadcast lock
-            await asyncio.sleep(0.05) 
-            
+            # Broadcast physics
+            frame = sim_manager.tick()
+            await websocket.send_text(json.dumps(frame))
+            await asyncio.sleep(0.05) # ~20 FPS simulation steps
     except WebSocketDisconnect:
-        print("Frontend Disconnected.")
+        print("[Server] Connection Dropped.")
     except Exception as e:
-        print(f"WS Error: {e}")
+        print(f"[Server] WS Error: {e}")
 
 if __name__ == "__main__":
-    print("Starting OptiFlow Backend on ws://localhost:8000")
+    print("Starting OptiFlow Real-World Engine on ws://localhost:8000")
     uvicorn.run("server:app", host="0.0.0.0", port=8000, reload=True)

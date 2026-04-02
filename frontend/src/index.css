@@ -2,9 +2,35 @@
 @tailwind components;
 @tailwind utilities;
 
-body {
+html, body, #root {
+  height: 100%;
+  width: 100%;
   margin: 0;
-  background-color: #0D1117;
-  color: white;
+  padding: 0;
+  background-color: #020617;
   overflow: hidden;
+}
+
+.leaflet-container {
+  height: 100% !important;
+  width: 100% !important;
+  background: #020617 !important;
+  z-index: 0;
+  /* Ensure no global filters interfere with tile rendering */
+  filter: none !important;
+  opacity: 1 !important;
+}
+
+/* The "Hidden Killer" Fix */
+.map-wrapper {
+  flex: 3;
+  min-height: 0; 
+  position: relative;
+  height: 100%;
+}
+
+.glass-card {
+  background: rgba(30, 41, 59, 0.5);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
 }

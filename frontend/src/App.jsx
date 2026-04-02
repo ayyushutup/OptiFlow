@@ -1,31 +1,109 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState, memo } from 'react';
+import { MapContainer, TileLayer, CircleMarker, Polyline, useMap, Tooltip } from 'react-leaflet';
+import { Activity, Clock, Navigation, BarChart3, Radio, Database, AlertCircle, Cpu, Zap, Map as MapIcon, Layers } from 'lucide-react';
+import L from 'leaflet';
 import './index.css';
+
+// Fix for default Leaflet icon issue in React
+delete L.Icon.Default.prototype._getIconUrl;
+L.Icon.Default.mergeOptions({
+  iconRetinaUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon-2x.png',
+  iconUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon.png',
+  shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
+});
 
 const DEFAULT_WS_URL = 'ws://localhost:8000/ws';
 const WS_URL = import.meta.env.VITE_WS_URL || DEFAULT_WS_URL;
+const API_URL = 'http://localhost:8000';
+
+const MUMBAI_CENTER = [19.0760, 72.8777];
+
+/**
+ * Force Leaflet to re-calculate container size after the initial layout stabilizes.
+ */
+function ResizeFix() {
+  const map = useMap();
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      map.invalidateSize();
+    }, 450); // Using 450ms as verified in sanity test
+    return () => clearTimeout(timer);
+  }, [map]);
+  return null;
+}
+
+// MEMOIZED MAP COMPONENT - Ensures the core map doesn't re-render on telemetry ticks
+const OptiMap = memo(({ mapData, children }) => {
+  return (
+    <MapContainer 
+      center={MUMBAI_CENTER} 
+      zoom={14} 
+      minZoom={12}
+      maxZoom={20}
+      scrollWheelZoom={true}
+      style={{ height: '100%', width: '100%' }}
+      zoomControl={false}
+      attributionControl={false}
+    >
+      <TileLayer
+        url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
+        attribution="&copy; <a href='https://www.openstreetmap.org/copyright'>OpenStreetMap</a> contributors &copy; <a href='https://carto.com/attributions'>CARTO</a>"
+        subdomains="abcd"
+        maxZoom={20}
+      />
+      <ResizeFix />
+      
+      {/* Static Road Network (OSM Edges) */}
+      {mapData?.edges?.map((edge, idx) => (
+        <Polyline 
+          key={`edge-${idx}`}
+          positions={edge.path}
+          pathOptions={{ 
+            color: '#1e293b', 
+            weight: 2.5,
+            opacity: 0.5
+          }}
+        />
+      ))}
+
+      {children}
+    </MapContainer>
+  );
+});
 
 export default function App() {
   const [data, setData] = useState(null);
+  const [mapData, setMapData] = useState(null);
   const [status, setStatus] = useState('connecting');
   const [socketError, setSocketError] = useState('');
-  const [canvasSize, setCanvasSize] = useState(720);
-  const canvasRef = useRef(null);
-  const canvasWrapRef = useRef(null);
 
+  // 🌍 1. Fetch Static Map Data on Mount
+  useEffect(() => {
+    const fetchMap = async () => {
+      try {
+        const res = await fetch(`${API_URL}/map`);
+        if (!res.ok) throw new Error('API Offline');
+        const json = await res.json();
+        setMapData(json);
+      } catch (e) {
+        setSocketError('Map geometry server unreachable (Port 8000)');
+      }
+    };
+    fetchMap();
+  }, []);
+
+  // 🛰️ 2. Stable WebSocket Lifecycle
   useEffect(() => {
     let ws = null;
     let reconnectTimer = null;
     let disposed = false;
-    let reconnectAttempts = 0;
 
     const connect = () => {
       if (disposed) return;
-
-      setStatus(reconnectAttempts > 0 ? 'reconnecting' : 'connecting');
+      setStatus('connecting');
       ws = new WebSocket(WS_URL);
 
       ws.onopen = () => {
-        reconnectAttempts = 0;
         setStatus('connected');
         setSocketError('');
       };
@@ -35,246 +113,188 @@ export default function App() {
           const parsed = JSON.parse(event.data);
           setData(parsed);
         } catch {
-          setSocketError('Received non-JSON frame from backend.');
+          console.error('Telemetry error');
         }
-      };
-
-      ws.onerror = () => {
-        setSocketError('WebSocket transport error. Retrying...');
       };
 
       ws.onclose = () => {
-        if (disposed) {
-          setStatus('disconnected');
-          return;
-        }
-
-        reconnectAttempts += 1;
+        if (disposed) return;
         setStatus('reconnecting');
-        const delay = Math.min(500 * 2 ** (reconnectAttempts - 1), 5000);
-        reconnectTimer = window.setTimeout(connect, delay);
+        reconnectTimer = window.setTimeout(connect, 3000); 
       };
+
+      ws.onerror = () => setSocketError('Neural link failed');
     };
 
     connect();
-
     return () => {
       disposed = true;
       if (reconnectTimer) window.clearTimeout(reconnectTimer);
-      if (ws && ws.readyState < WebSocket.CLOSING) ws.close();
+      if (ws) ws.close();
     };
   }, []);
-
-  useEffect(() => {
-    const updateCanvasSize = () => {
-      if (!canvasWrapRef.current) return;
-      const rect = canvasWrapRef.current.getBoundingClientRect();
-      const nextSize = Math.max(280, Math.floor(Math.min(rect.width, rect.height)));
-      setCanvasSize(nextSize);
-    };
-
-    updateCanvasSize();
-    const observer = new ResizeObserver(updateCanvasSize);
-    if (canvasWrapRef.current) observer.observe(canvasWrapRef.current);
-
-    return () => observer.disconnect();
-  }, []);
-
-  useEffect(() => {
-    if (!data || !canvasRef.current || !canvasSize) return;
-
-    const canvas = canvasRef.current;
-    const ctx = canvas.getContext('2d');
-    const dpr = window.devicePixelRatio || 1;
-
-    canvas.width = Math.floor(canvasSize * dpr);
-    canvas.height = Math.floor(canvasSize * dpr);
-    canvas.style.width = `${canvasSize}px`;
-    canvas.style.height = `${canvasSize}px`;
-
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-
-    const rows = data.config?.rows || 3;
-    const cols = data.config?.cols || 3;
-
-    const pad = Math.round(canvasSize * 0.16);
-    const width = canvasSize - pad * 2;
-    const height = canvasSize - pad * 2;
-    const spacingX = cols > 1 ? width / (cols - 1) : 0;
-    const spacingY = rows > 1 ? height / (rows - 1) : 0;
-    const roadThickness = Math.max(16, Math.floor(canvasSize * 0.045));
-
-    ctx.fillStyle = '#0D1117';
-    ctx.fillRect(0, 0, canvasSize, canvasSize);
-
-    const positions = {};
-    if (Array.isArray(data.intersections)) {
-      data.intersections.forEach((inter) => {
-        const x = pad + inter.c * spacingX;
-        const y = pad + inter.r * spacingY;
-        positions[inter.id] = { x, y };
-      });
-    }
-
-    for (let r = 0; r < rows; r += 1) {
-      const y = pad + r * spacingY;
-      ctx.beginPath();
-      ctx.moveTo(pad - spacingX * 0.6, y);
-      ctx.lineTo(pad + width + spacingX * 0.6, y);
-      ctx.lineWidth = roadThickness;
-      ctx.strokeStyle = '#1E293B';
-      ctx.stroke();
-
-      ctx.lineWidth = 2;
-      ctx.strokeStyle = '#334155';
-      ctx.setLineDash([12, 10]);
-      ctx.stroke();
-      ctx.setLineDash([]);
-    }
-
-    for (let c = 0; c < cols; c += 1) {
-      const x = pad + c * spacingX;
-      ctx.beginPath();
-      ctx.moveTo(x, pad - spacingY * 0.6);
-      ctx.lineTo(x, pad + height + spacingY * 0.6);
-      ctx.lineWidth = roadThickness;
-      ctx.strokeStyle = '#1E293B';
-      ctx.stroke();
-
-      ctx.lineWidth = 2;
-      ctx.strokeStyle = '#334155';
-      ctx.setLineDash([12, 10]);
-      ctx.stroke();
-      ctx.setLineDash([]);
-    }
-
-    if (Array.isArray(data.intersections)) {
-      data.intersections.forEach((inter) => {
-        const p = positions[inter.id];
-        if (!p) return;
-
-        const lightOffset = Math.max(14, Math.floor(canvasSize * 0.03));
-        const lightRadius = Math.max(8, Math.floor(canvasSize * 0.022));
-
-        ctx.fillStyle = '#0F172A';
-        ctx.fillRect(p.x - 20, p.y - 20, 40, 40);
-
-        const drawGlow = (lx, ly, color) => {
-          const gradient = ctx.createRadialGradient(lx, ly, 0, lx, ly, lightRadius + 8);
-          gradient.addColorStop(0, color);
-          gradient.addColorStop(1, 'transparent');
-          ctx.fillStyle = gradient;
-          ctx.beginPath();
-          ctx.arc(lx, ly, lightRadius + 8, 0, 2 * Math.PI);
-          ctx.fill();
-        };
-
-        if (inter.is_yellow) {
-          drawGlow(p.x, p.y, 'rgba(234, 179, 8, 1)');
-        } else {
-          const nsColor = inter.green_dirs.includes('NS')
-            ? 'rgba(34, 197, 94, 0.9)'
-            : 'rgba(239, 68, 68, 0.9)';
-          const ewColor = inter.green_dirs.includes('EW')
-            ? 'rgba(34, 197, 94, 0.9)'
-            : 'rgba(239, 68, 68, 0.9)';
-
-          drawGlow(p.x, p.y - lightOffset, nsColor);
-          drawGlow(p.x, p.y + lightOffset, nsColor);
-          drawGlow(p.x - lightOffset, p.y, ewColor);
-          drawGlow(p.x + lightOffset, p.y, ewColor);
-        }
-      });
-    }
-
-    if (Array.isArray(data.vehicles)) {
-      const vehicleRadius = Math.max(3, Math.floor(canvasSize * 0.008));
-      ctx.fillStyle = '#38BDF8';
-      ctx.shadowColor = '#38BDF8';
-      ctx.shadowBlur = 10;
-
-      data.vehicles.forEach((v) => {
-        if (!v.from || !v.to) return;
-
-        const p1 = positions[v.from];
-        const p2 = positions[v.to];
-        if (!p1 || !p2) return;
-
-        const progress = Math.max(0, Math.min(1, (v.pos || 0) / (v.length || 1)));
-        const cx = p1.x + (p2.x - p1.x) * progress;
-        const cy = p1.y + (p2.y - p1.y) * progress;
-
-        ctx.beginPath();
-        ctx.arc(cx, cy, vehicleRadius, 0, 2 * Math.PI);
-        ctx.fill();
-      });
-
-      ctx.shadowBlur = 0;
-    }
-  }, [canvasSize, data]);
 
   const metrics = data?.metrics || {};
-  const statusCopy = useMemo(() => {
-    if (status === 'connected') return 'PyTorch Server Active';
-    if (status === 'reconnecting') return 'Reconnecting to OptiFlow Core...';
-    if (status === 'disconnected') return 'Connection Closed';
-    return 'Connecting to OptiFlow Core...';
-  }, [status]);
 
   return (
-    <div className="w-screen h-screen bg-[#0D1117] overflow-hidden flex flex-col lg:flex-row font-sans">
-      <div className="flex-1 relative flex items-center justify-center p-4 lg:p-6">
-        <div ref={canvasWrapRef} className="w-full h-full flex items-center justify-center">
-          <canvas ref={canvasRef} className="rounded-lg shadow-2xl max-w-full max-h-full" />
+    <div className="flex w-screen h-screen bg-[#020617] font-sans selection:bg-sky-500/30 overflow-hidden">
+      
+      {/* Simulation View (75%) */}
+      <div className="flex-[3] min-h-0 relative shadow-[inset_-30px_0_50px_rgba(0,0,0,0.8)]">
+        <OptiMap mapData={mapData}>
+           
+           {/* INTERSECTIONS */}
+           {data?.intersections?.map((inter) => (
+             <CircleMarker 
+                key={`signal-${inter.id}`}
+                center={[inter.lat, inter.lon]}
+                radius={10}
+                pathOptions={{
+                  fillColor: inter.is_yellow ? '#fbbf24' : (inter.green_dirs?.includes('NS') ? '#10b981' : '#f43f5e'),
+                  fillOpacity: 1.0,
+                  color: '#fff',
+                  weight: 2
+                }}
+              >
+                <Tooltip direction="top" className="bg-slate-900 border-none text-[9px] font-black text-white px-2 py-0.5 rounded-sm opacity-80">
+                   NODE {inter.id.toString().slice(-4)}
+                </Tooltip>
+             </CircleMarker>
+           ))}
+
+           {/* VEHICLES */}
+           {data?.vehicles?.map((v) => {
+              const edge = mapData?.edges?.find(e => e.from === v.from && e.to === v.to);
+              if (!edge || !edge.path) return null;
+
+              const progress = v.pos / v.length;
+              const pathIdx = Math.floor(progress * (edge.path.length - 1));
+              const nextIdx = Math.min(pathIdx + 1, edge.path.length - 1);
+              const subProgress = (progress * (edge.path.length - 1)) - pathIdx;
+              
+              const p1 = edge.path[pathIdx];
+              const p2 = edge.path[nextIdx];
+              const currentPos = [
+                p1[0] + (p2[0] - p1[0]) * subProgress,
+                p1[1] + (p2[1] - p1[1]) * subProgress
+              ];
+
+              return (
+                <CircleMarker 
+                  key={`v-${v.id}`}
+                  center={currentPos}
+                  radius={5}
+                  pathOptions={{ fillColor: '#38bdf8', fillOpacity: 1, color: '#fff', weight: 1.5 }}
+                />
+              );
+           })}
+        </OptiMap>
+
+        {/* HUD Overlay */}
+        <div className="absolute top-8 left-8 z-[1000] flex flex-col gap-4 pointer-events-none">
+          <StatusBadge status={status} />
+          <div className="glass-card px-4 py-2 rounded-xl flex items-center gap-2 border-sky-400/20">
+            <Radio className="w-4 h-4 text-sky-400 animate-pulse" />
+            <span className="text-[10px] font-black tracking-widest uppercase text-sky-100">Neural Network v3.2</span>
+          </div>
         </div>
 
-        <div className="absolute top-4 left-4 lg:top-6 lg:left-6 flex items-center gap-3 bg-slate-800/60 px-4 py-2 border border-slate-700/50 rounded-full backdrop-blur-md shadow-lg">
-          <div
-            className={`w-3 h-3 rounded-full ${
-              status === 'connected'
-                ? 'bg-green-500 shadow-[0_0_12px_#22c55e]'
-                : 'bg-red-500 shadow-[0_0_12px_#ef4444]'
-            }`}
-          ></div>
-          <span className="text-slate-200 text-xs lg:text-sm font-semibold tracking-wider">{statusCopy}</span>
+        <div className="absolute bottom-8 left-8 z-[1000] glass-card p-4 rounded-2xl flex gap-6 text-[10px] font-black uppercase tracking-widest text-slate-400 shadow-2xl backdrop-blur-3xl border-white/5">
+           <div className="flex items-center gap-2"><div className="w-3.5 h-3.5 rounded-full bg-emerald-500 shadow-[0_0_10px_#10b981]"></div> Optimize</div>
+           <div className="flex items-center gap-2"><div className="w-3.5 h-3.5 rounded-full bg-rose-500 shadow-[0_0_10px_#f43f5e]"></div> Queue</div>
+           <div className="flex items-center gap-2"><div className="w-3.5 h-3.5 rounded-full bg-sky-400 shadow-[0_0_10px_#38bdf8]"></div> Agent</div>
         </div>
       </div>
 
-      <div className="w-full lg:w-80 bg-slate-900/90 backdrop-blur-xl border-t lg:border-t-0 lg:border-l border-sky-500/20 p-6 lg:p-8 flex flex-col shadow-[-20px_0_50px_rgba(56,189,248,0.05)] z-10">
-        <h1 className="text-2xl lg:text-3xl font-black text-transparent bg-clip-text bg-gradient-to-r from-sky-400 to-blue-600 mb-6 lg:mb-8 uppercase tracking-widest drop-shadow-[0_0_10px_rgba(56,189,248,0.3)]">
-          OptiFlow
-          <br />
-          <span className="text-sm text-slate-400 font-medium">Neural Dashboard</span>
-        </h1>
+      {/* Analytics Sidebar (25%) */}
+      <div className="w-[380px] bg-[#0b1220] h-full overflow-auto flex flex-col gap-6 p-8 border-l border-white/5 relative z-[1001] shadow-2xl">
+        <div className="mb-6 pointer-events-none">
+          <div className="flex items-center gap-2 mb-2">
+             <div className="w-6 h-6 bg-sky-500 rounded-lg flex items-center justify-center">
+                <BarChart3 className="w-4 h-4 text-[#020617]" />
+             </div>
+             <span className="text-[10px] font-black tracking-[0.3em] text-sky-500 uppercase">OptiFlow Advanced</span>
+          </div>
+          <h1 className="text-4xl font-black italic tracking-tighter text-white contrast-200 uppercase">
+             Dashboard
+          </h1>
+        </div>
 
-        <div className="space-y-4 lg:space-y-5 flex-1">
-          <Metric title="Training Episode" value={metrics.episode !== undefined ? metrics.episode : '--'} />
-          <Metric title="Global Clock" value={metrics.step !== undefined ? metrics.step : '--'} />
-          <Metric
-            title="Vehicles Monitored"
-            value={metrics.active_vehicles !== undefined ? metrics.active_vehicles : '--'}
+        <div className="flex flex-col gap-4 pb-12">
+          <StatCard 
+            icon={<Clock className="text-sky-400" />} 
+            label="Grid Runtime" 
+            value={metrics.step ? `${metrics.step} ticks` : "--"} 
+            hint="System clock"
           />
-          <Metric title="Gridlock Queue" value={metrics.total_queued !== undefined ? metrics.total_queued : '--'} />
-          <Metric
-            title="Average Wait Time"
-            value={metrics.total_waiting_time !== undefined ? metrics.total_waiting_time : '--'}
+          <StatCard 
+            icon={<Navigation className="text-emerald-400" />} 
+            label="Fleet Size" 
+            value={metrics.active_vehicles || "0"} 
+            hint="Active nodes"
+          />
+          <StatCard 
+            icon={<Zap className="text-rose-400" />} 
+            label="System Delay" 
+            value={metrics.total_waiting_time !== undefined ? `${(metrics.total_waiting_time / 10).toFixed(1)}s` : "--"} 
+            hint="Aggregated"
           />
         </div>
 
-        <div className="mt-6 border-t border-slate-800 pt-5">
-          <p className="text-xs text-slate-500 font-medium tracking-widest uppercase">Powered by FastAPI + React</p>
-          {socketError ? <p className="text-xs text-rose-400 mt-2">{socketError}</p> : null}
+        <div className="mt-auto space-y-4">
+          <div className="glass-card p-6 rounded-3xl border-emerald-500/10 flex items-center gap-4">
+             <div className="p-3 bg-emerald-500/10 rounded-xl">
+                <Cpu className="w-6 h-6 text-emerald-400" />
+             </div>
+             <div>
+                <p className="text-[10px] text-slate-500 font-black uppercase tracking-widest leading-none mb-1.5">Decision Matrix</p>
+                <p className="text-sm font-bold text-emerald-100 italic tracking-tight underline decoration-emerald-500/30">DQN Multi-Agent Active</p>
+             </div>
+          </div>
         </div>
+
+        {socketError && (
+          <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[85%] p-8 glass-card bg-rose-500/10 border-rose-500/40 rounded-[2.5rem] text-center backdrop-blur-3xl shadow-2xl">
+             <AlertCircle className="w-12 h-12 text-rose-500 mx-auto mb-4" />
+             <p className="text-xl font-black text-rose-100 mb-2 uppercase tracking-widest">Connection Error</p>
+             <p className="text-[11px] text-rose-300 font-bold leading-relaxed">{socketError}</p>
+          </div>
+        )}
       </div>
     </div>
   );
 }
 
-function Metric({ title, value }) {
+function StatCard({ icon, label, value, hint }) {
   return (
-    <div className="bg-slate-800/30 border border-slate-700/50 p-4 rounded-xl transition-all duration-300 hover:bg-slate-800/50 hover:border-sky-500/30">
-      <h3 className="text-slate-400 text-[10px] font-bold uppercase tracking-widest mb-1">{title}</h3>
-      <p className="text-2xl lg:text-3xl font-light font-mono text-slate-100">{value}</p>
+    <div className="glass-card p-7 rounded-[2.5rem] transition-all hover:bg-slate-800/40 border border-white/5 relative group">
+      <div className="flex justify-between items-start relative z-10">
+        <div className="p-3 bg-slate-900 rounded-xl border border-white/5 group-hover:border-sky-500/20">
+          {icon}
+        </div>
+        <div className="text-right">
+          <p className="text-[10px] font-black text-slate-600 uppercase tracking-widest mb-1">{hint}</p>
+          <p className="text-xs font-black text-slate-400 uppercase tracking-widest leading-none">{label}</p>
+        </div>
+      </div>
+      <p className="text-4xl font-light text-slate-50 mt-6 tabular-nums tracking-tighter">{value}</p>
+    </div>
+  );
+}
+
+function StatusBadge({ status }) {
+  const configs = {
+    connected: { color: 'bg-emerald-500 shadow-emerald-500/40', text: 'Bridge Sync: Strong' },
+    connecting: { color: 'bg-amber-500 shadow-amber-500/40', text: 'Initializing' },
+    reconnecting: { color: 'bg-rose-500 shadow-rose-500/40', text: 'Signal Interference' },
+    disconnected: { color: 'bg-slate-500', text: 'System Offline' }
+  };
+  const config = configs[status] || configs.disconnected;
+
+  return (
+    <div className="glass-card px-5 py-3 rounded-2xl flex items-center gap-3 border border-white/5 shadow-2xl backdrop-blur-3xl">
+      <div className={`w-2 h-2 rounded-full ${config.color} animate-pulse`}></div>
+      <span className="text-[10px] font-black tracking-widest uppercase text-slate-100 leading-none">{config.text}</span>
     </div>
   );
 }
