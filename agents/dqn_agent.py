@@ -77,13 +77,17 @@ class DQNAgent:
             print(f"[DQNAgent] No weights found at {path}")
             return False
             
-        checkpoint = torch.load(path, map_location=self.device)
-        self.model.load_state_dict(checkpoint['model_state_dict'])
-        self.target_model.load_state_dict(checkpoint['model_state_dict'])
-        self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-        self.epsilon = checkpoint.get('epsilon', self.epsilon)
-        print(f"[DQNAgent] Weights loaded from {path}")
-        return True
+        try:
+            checkpoint = torch.load(path, map_location=self.device)
+            self.model.load_state_dict(checkpoint['model_state_dict'])
+            self.target_model.load_state_dict(checkpoint['model_state_dict'])
+            self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+            self.epsilon = checkpoint.get('epsilon', self.epsilon)
+            print(f"[DQNAgent] Weights loaded from {path}")
+            return True
+        except RuntimeError as e:
+            print(f"[DQNAgent] Weights dimension mismatch, starting fresh. Error: {e}")
+            return False
 
     def update_target_model(self):
         self.target_model.load_state_dict(self.model.state_dict())

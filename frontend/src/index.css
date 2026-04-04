@@ -5,228 +5,202 @@ html, body, #root {
   width: 100%;
   margin: 0;
   padding: 0;
-  background-color: #020617;
+  background-color: #02040a;
+  overflow: hidden;
 }
 
-/* ─── Color Tokens ─── */
+/* ─── Cyberpunk Token System ─── */
 :root {
-  --c-fast:     #00FFAA;
-  --c-medium:   #FFD166;
-  --c-congested: #FF4D4D;
-  --c-node:     #4CC9F0;
-  --c-ai:       #9B5DE5;
-  --c-bg:       #020617;
-  --c-sidebar:  #0b1220;
+  --c-fast:      #00FFC6;
+  --c-medium:    #FF00FF;
+  --c-congested: #FF3B3B;
+  --c-node:      #00BFFF;
+  --c-ai:        #9B5DE5;
+  --c-bg:        #02040a;
+  --c-sidebar:   rgba(10, 10, 20, 0.85);
 }
 
-/* ─── Animations ─── */
-@keyframes fade-in {
-  from { opacity: 0; }
-  to { opacity: 1; }
-}
-@keyframes fade-in-up {
-  from { opacity: 0; transform: translateY(20px); }
-  to { opacity: 1; transform: translateY(0); }
-}
-@keyframes pulse-ring {
-  0%   { transform: scale(1);   opacity: 0.8; }
-  70%  { transform: scale(2.4); opacity: 0; }
-  100% { transform: scale(1);   opacity: 0; }
-}
-@keyframes node-breathe {
-  0%, 100% { box-shadow: 0 0 6px 2px var(--c-node); }
-  50%      { box-shadow: 0 0 14px 6px var(--c-node); }
-}
-@keyframes scanline {
-  0%   { transform: translateY(-100%); }
-  100% { transform: translateY(100vh); }
-}
-@keyframes glow-pulse {
-  0%, 100% { opacity: 0.4; }
-  50%      { opacity: 0.7; }
-}
-
-.animate-fade-in {
-  animation: fade-in 0.8s ease-out forwards;
-  opacity: 0;
-}
-.animate-fade-in-up {
-  animation: fade-in-up 0.8s ease-out forwards;
-  opacity: 0;
-}
-
-/* ─── Leaflet Base ─── */
+/* ─── Map Base & Tiles ─── */
 .leaflet-container {
   height: 100% !important;
   width: 100% !important;
-  background: var(--c-bg) !important;
+  background: #000000 !important;
   z-index: 0;
   filter: none !important;
   opacity: 1 !important;
 }
 
-/* Remove leaflet attribution visual noise */
+.leaflet-tile {
+  filter: brightness(1.25) contrast(1.1) saturate(0.8) hue-rotate(-10deg) !important;
+}
+
 .leaflet-control-attribution {
   display: none !important;
 }
 
-/* ─── Map Wrapper ─── */
+/* ─── Map Container ─── */
 .map-wrapper {
   flex: 3;
   min-height: 0;
   position: relative;
   height: 100%;
+  background: #000;
 }
 
-/* ─── 🌫️ Cinematic Dark Overlay (Radial Vignette) ─── */
-.map-overlay-vignette {
+/* Atmospheric Fog (Neon Diffusion) */
+.map-wrapper::after {
   content: "";
   position: absolute;
   inset: 0;
-  background: radial-gradient(
-    ellipse at 50% 50%,
-    rgba(0, 20, 40, 0.05) 0%,
-    rgba(0, 10, 25, 0.25) 60%,
-    rgba(0, 0, 0, 0.55) 100%
+  background: radial-gradient(circle at center,
+    rgba(0, 255, 200, 0.05) 0%,
+    rgba(255, 0, 150, 0.08) 40%,
+    rgba(0, 0, 0, 0.5) 100%
   );
   pointer-events: none;
   z-index: 500;
 }
 
-/* ─── ⚡ Subtle Tech Grid Overlay ─── */
-.map-overlay-grid {
+/* Tech Grid */
+.map-wrapper::before {
   content: "";
   position: absolute;
   inset: 0;
   background-image:
-    linear-gradient(rgba(255,255,255,0.018) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(255,255,255,0.018) 1px, transparent 1px);
-  background-size: 40px 40px;
+    linear-gradient(rgba(0, 255, 255, 0.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 0, 255, 0.03) 1px, transparent 1px);
+  background-size: 50px 50px;
   pointer-events: none;
   z-index: 501;
 }
 
-/* ─── Scanline Sweep (very subtle) ─── */
-.map-overlay-scanline {
-  position: absolute;
-  inset: 0;
-  overflow: hidden;
-  pointer-events: none;
-  z-index: 502;
-}
-.map-overlay-scanline::after {
-  content: "";
-  position: absolute;
-  left: 0;
-  width: 100%;
-  height: 3px;
-  background: linear-gradient(
-    90deg,
-    transparent 0%,
-    rgba(0,255,170,0.08) 20%,
-    rgba(0,255,170,0.15) 50%,
-    rgba(0,255,170,0.08) 80%,
-    transparent 100%
-  );
-  animation: scanline 6s linear infinite;
+/* ─── Glitch Effects ─── */
+@keyframes glitch {
+  0% { transform: translate(0); }
+  20% { transform: translate(-2px, 2px); }
+  40% { transform: translate(2px, -2px); }
+  60% { transform: translate(-2px, 0); }
+  80% { transform: translate(2px, 2px); }
+  100% { transform: translate(0); }
 }
 
-/* ─── 🔥 Road Glow Layer ─── */
-.road-glow {
-  filter: drop-shadow(0 0 6px rgba(0,255,170,0.35));
-}
-.road-glow-medium {
-  filter: drop-shadow(0 0 5px rgba(255,209,102,0.4));
-}
-.road-glow-congested {
-  filter: drop-shadow(0 0 6px rgba(255,77,77,0.5));
+.glitch {
+  animation: glitch 3s infinite steps(2);
+  display: inline-block;
 }
 
-/* ─── 🚗 Vehicle Glow ─── */
-.vehicle-glow-fast {
-  filter: drop-shadow(0 0 5px rgba(0,255,170,0.8));
-}
-.vehicle-glow-medium {
-  filter: drop-shadow(0 0 4px rgba(255,209,102,0.7));
-}
-.vehicle-glow-stopped {
-  filter: drop-shadow(0 0 5px rgba(255,77,77,0.7));
+/* ─── Data Streams (Animated Roads) ─── */
+@keyframes flow {
+  to { stroke-dashoffset: -20; }
 }
 
-/* ─── Node Pulse Ring (CSS for CircleMarker "active" halo) ─── */
-.node-pulse-ring {
-  position: absolute;
-  border-radius: 50%;
-  animation: pulse-ring 2s cubic-bezier(0.215, 0.61, 0.355, 1) infinite;
-  pointer-events: none;
+.road-flow {
+  stroke-dasharray: 4 8;
+  animation: flow 1s linear infinite;
+  stroke-linecap: round;
 }
 
-/* ─── Glass Card ─── */
+/* ─── Extreme Neon Glows ─── */
+.neon-glow-fast {
+  filter: drop-shadow(0 0 6px var(--c-fast))
+          drop-shadow(0 0 12px var(--c-fast))
+          drop-shadow(0 0 20px var(--c-fast));
+}
+
+.neon-glow-medium {
+  filter: drop-shadow(0 0 6px var(--c-medium))
+          drop-shadow(0 0 12px var(--c-medium))
+          drop-shadow(0 0 20px var(--c-medium));
+}
+
+.neon-glow-congested {
+  filter: drop-shadow(0 0 6px var(--c-congested))
+          drop-shadow(0 0 12px var(--c-congested))
+          drop-shadow(0 0 20px var(--c-congested));
+}
+
+.neon-glow-ai {
+  filter: drop-shadow(0 0 8px var(--c-ai))
+          drop-shadow(0 0 16px var(--c-ai));
+}
+
+.neon-glow-node {
+  filter: drop-shadow(0 0 4px var(--c-fast))
+          drop-shadow(0 0 12px var(--c-node))
+          drop-shadow(0 0 24px var(--c-medium));
+}
+
+/* ─── UI Panels -> Neon Glass ─── */
 .glass-card {
-  background: rgba(15, 23, 42, 0.65);
-  backdrop-filter: blur(16px) saturate(1.6);
-  -webkit-backdrop-filter: blur(16px) saturate(1.6);
-  border: 1px solid rgba(255, 255, 255, 0.07);
-  box-shadow:
-    0 4px 30px rgba(0,0,0,0.3),
-    inset 0 1px 0 rgba(255,255,255,0.05);
+  background: var(--c-sidebar);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(0, 255, 255, 0.15);
+  box-shadow: 
+    0 0 20px rgba(0, 255, 255, 0.05),
+    inset 0 0 15px rgba(255, 0, 255, 0.02);
+  transition: all 0.3s ease;
 }
 
-/* ─── Edge Depth Fade (map boundary fog) ─── */
-.map-depth-fade {
-  position: absolute;
+.glass-card:hover {
+  border-color: rgba(0, 255, 255, 0.4);
+  box-shadow: 
+    0 0 30px rgba(0, 255, 255, 0.1),
+    inset 0 0 20px rgba(255, 0, 255, 0.05);
+}
+
+/* ─── Global Scanline Effect ─── */
+body::after {
+  content: "";
+  position: fixed;
   inset: 0;
-  mask-image: radial-gradient(ellipse at center, white 55%, transparent 100%);
-  -webkit-mask-image: radial-gradient(ellipse at center, white 55%, transparent 100%);
+  background: repeating-linear-gradient(
+    to bottom,
+    transparent,
+    transparent 2px,
+    rgba(0, 255, 255, 0.035) 3px,
+    rgba(0, 255, 255, 0.01) 4px
+  );
   pointer-events: none;
-  z-index: 499;
+  z-index: 9999;
 }
 
 /* ─── Tooltip override ─── */
 .leaflet-tooltip {
-  background: rgba(2, 6, 23, 0.92) !important;
-  border: 1px solid rgba(76, 201, 240, 0.3) !important;
-  color: #e2e8f0 !important;
+  background: rgba(10, 10, 15, 0.95) !important;
+  border: 1px solid var(--c-node) !important;
+  color: var(--c-fast) !important;
   font-size: 10px !important;
-  font-weight: 800 !important;
-  letter-spacing: 0.12em !important;
+  font-weight: 900 !important;
+  letter-spacing: 0.15em !important;
   text-transform: uppercase !important;
-  border-radius: 6px !important;
-  padding: 3px 8px !important;
-  box-shadow: 0 0 12px rgba(76,201,240,0.15) !important;
-}
-.leaflet-tooltip-top::before {
-  border-top-color: rgba(76, 201, 240, 0.3) !important;
+  border-radius: 4px !important;
+  padding: 4px 8px !important;
+  box-shadow: 0 0 15px rgba(0, 191, 255, 0.4) !important;
+  text-shadow: 0 0 5px var(--c-fast);
 }
 
-/* ─── HUD Elements ─── */
-.hud-tag {
-  font-size: 9px;
-  font-weight: 900;
-  letter-spacing: 0.25em;
-  text-transform: uppercase;
-  color: rgba(148,163,184,0.7);
-}
-
-/* ─── Sidebar Stat Glow on Hover ─── */
-.stat-card-glow {
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-}
-.stat-card-glow:hover {
-  box-shadow:
-    0 0 30px rgba(56, 189, 248, 0.08),
-    inset 0 1px 0 rgba(255,255,255,0.08);
-  border-color: rgba(56,189,248, 0.15);
-}
-
-/* ─── Legend Dot Glow ─── */
+/* ─── Legend Dots ─── */
 .legend-dot {
   border-radius: 50%;
   width: 10px;
   height: 10px;
 }
-.legend-dot-fast     { background: var(--c-fast);     box-shadow: 0 0 8px var(--c-fast); }
-.legend-dot-medium   { background: var(--c-medium);   box-shadow: 0 0 8px var(--c-medium); }
-.legend-dot-congested{ background: var(--c-congested); box-shadow: 0 0 8px var(--c-congested); }
-.legend-dot-node     { background: var(--c-node);     box-shadow: 0 0 8px var(--c-node); }
-.legend-dot-ai       { background: var(--c-ai);       box-shadow: 0 0 8px var(--c-ai); }
+.legend-dot-fast     { background: var(--c-fast);     box-shadow: 0 0 10px var(--c-fast); }
+.legend-dot-medium   { background: var(--c-medium);   box-shadow: 0 0 10px var(--c-medium); }
+.legend-dot-congested{ background: var(--c-congested); box-shadow: 0 0 10px var(--c-congested); }
+.legend-dot-node     { background: var(--c-node);     box-shadow: 0 0 10px var(--c-node); }
+.legend-dot-ai       { background: var(--c-ai);       box-shadow: 0 0 10px var(--c-ai); }
+
+/* ─── Typography & Utilities ─── */
+.hud-tag {
+  font-size: 9px;
+  font-weight: 900;
+  letter-spacing: 0.25em;
+  text-transform: uppercase;
+  color: #fff;
+}
+
+.text-cyber-glow {
+  text-shadow: 0 0 8px currentColor;
+}

@@ -1,7 +1,9 @@
-import { useEffect, useMemo, useState, useCallback, memo } from 'react';
+import { useEffect, useMemo, useState, useCallback, memo, useRef } from 'react';
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, ResponsiveContainer, Tooltip as RechartsTooltip } from 'recharts';
 import { MapContainer, TileLayer, CircleMarker, Polyline, useMap, Tooltip } from 'react-leaflet';
 import { Activity, Clock, Navigation, BarChart3, Radio, AlertCircle, Cpu, Zap, Gauge, OctagonX, Crosshair, Layers, Eye } from 'lucide-react';
 import L from 'leaflet';
+import 'leaflet/dist/leaflet.css';
 import './index.css';
 
 // Fix for default Leaflet icon issue in React
@@ -18,17 +20,17 @@ const API_URL = 'http://localhost:8000';
 
 const MUMBAI_CENTER = [19.0760, 72.8777];
 
-// ─── Color System (strict, cinematic) ───
+// ─── Color System (Cyberpunk) ───
 const COLORS = {
-  fast:      '#00FFAA',
-  medium:    '#FFD166',
-  congested: '#FF4D4D',
-  node:      '#4CC9F0',
-  ai:        '#9B5DE5',
-  roadBase:  '#1a2536',
-  roadEmpty: '#111b2a',
-  nsGreen:   '#00FFAA',
-  ewGreen:   '#FF6B9D',
+  fast:      '#00FFC6',
+  medium:    '#FF00FF', // magenta
+  congested: '#FF3B3B', // neon red
+  node:      '#00BFFF', // electric blue
+  ai:        '#9B5DE5', // purple
+  roadBase:  '#050A15',
+  roadEmpty: '#030610',
+  nsGreen:   '#00FFC6',
+  ewGreen:   '#FF00FF',
   yellow:    '#FFD166',
 };
 
@@ -67,9 +69,9 @@ function getEdgeCongestionOpacity(count) {
 
 function getEdgeGlowClass(count) {
   if (!count || count === 0) return '';
-  if (count <= 1) return 'road-glow';
-  if (count <= 2) return 'road-glow-medium';
-  return 'road-glow-congested';
+  if (count <= 1) return 'neon-glow-fast';
+  if (count <= 2) return 'neon-glow-medium';
+  return 'neon-glow-congested';
 }
 
 // Vehicle color (strict palette)
@@ -80,9 +82,9 @@ function getVehicleColor(speed) {
 }
 
 function getVehicleGlowClass(speed) {
-  if (speed < 0.5) return 'vehicle-glow-stopped';
-  if (speed < 5) return 'vehicle-glow-medium';
-  return 'vehicle-glow-fast';
+  if (speed < 0.5) return 'neon-glow-congested';
+  if (speed < 5) return 'neon-glow-medium';
+  return 'neon-glow-fast';
 }
 
 // Signal color
@@ -100,6 +102,7 @@ const OptiMap = memo(({ children }) => {
       zoom={14} 
       minZoom={12}
       maxZoom={20}
+      preferCanvas={true}
       scrollWheelZoom={true}
       style={{ height: '100%', width: '100%' }}
       zoomControl={false}
@@ -123,6 +126,9 @@ export default function Dashboard() {
   const [mapData, setMapData] = useState(null);
   const [status, setStatus] = useState('connecting');
   const [socketError, setSocketError] = useState('');
+  const [history, setHistory] = useState([]);
+  const [selectedNodeId, setSelectedNodeId] = useState(null);
+  const wsRef = useRef(null);
 
   // 🌍 1. Fetch Static Map Data on Mount
   useEffect(() => {
@@ -155,10 +161,26 @@ export default function Dashboard() {
         setSocketError('');
       };
 
+      wsRef.current = ws;
+
+      let lastUpdate = 0;
+
       ws.onmessage = (event) => {
         try {
+          // Throttle updates to ~5 FPS to prevent massive memory leaks in Safari
+          const now = Date.now();
+          if (now - lastUpdate < 200) return;
+          lastUpdate = now;
+
           const parsed = JSON.parse(event.data);
           setData(parsed);
+          if (parsed.metrics) {
+             setHistory(prev => {
+                 const updated = [...prev, { time: parsed.metrics.step, speed: parsed.metrics.avg_speed, wait: parsed.metrics.total_waiting_time }];
+                 if (updated.length > 50) updated.shift();
+                 return updated;
+             });
+          }
         } catch {
           console.error('Telemetry error');
         }
@@ -188,7 +210,7 @@ export default function Dashboard() {
     <div className="flex w-screen h-screen bg-[#020617] font-sans selection:bg-sky-500/30 overflow-hidden">
       
       {/* ══════════ Simulation View (75%) ══════════ */}
-      <div className="flex-[3] min-h-0 relative shadow-[inset_-30px_0_50px_rgba(0,0,0,0.8)]">
+      <div className="map-wrapper flex-[3] min-h-0 relative shadow-[inset_-30px_0_50px_rgba(0,0,0,0.8)]">
 
         <OptiMap>
 
@@ -206,45 +228,66 @@ export default function Dashboard() {
             />
           ))}
 
-          {/* ════ Layer 2: Traffic Congestion Overlay (glowing) ══════ */}
+          {/* ════ Layer 2 & 3: Congestion Overlay & AI Streams ══════ */}
           {mapData?.edges?.map((edge, idx) => {
             const congestionKey = `${edge.from}_${edge.to}`;
             const count = data?.edge_congestion?.[congestionKey] || 0;
             return (
-              <Polyline 
-                key={`heat-${idx}`}
-                positions={edge.path}
-                pathOptions={{ 
-                  color: getEdgeCongestionColor(count), 
-                  weight: getEdgeCongestionWeight(count),
-                  opacity: getEdgeCongestionOpacity(count),
-                  className: getEdgeGlowClass(count),
-                  lineCap: 'round',
-                  lineJoin: 'round'
-                }}
-              />
+              <div key={`edge-group-${idx}`}>
+                {/* Congestion Glow */}
+                <Polyline 
+                  positions={edge.path}
+                  eventHandlers={{
+                    click: () => wsRef.current?.send(JSON.stringify({type: 'ADD_INCIDENT', from: edge.from, to: edge.to}))
+                  }}
+                  pathOptions={{ 
+                    color: getEdgeCongestionColor(count), 
+                    weight: getEdgeCongestionWeight(count) * 1.5, // Thicker so it's easier to click
+                    opacity: Math.max(0.2, getEdgeCongestionOpacity(count)), 
+                    className: getEdgeGlowClass(count) + ' cursor-pointer',
+                    lineCap: 'round',
+                    lineJoin: 'round'
+                  }}
+                />
+                
+                {/* AI Data Stream (Flowing dashed lines if active) */}
+                {count > 0 && (
+                  <Polyline 
+                    positions={edge.path}
+                    pathOptions={{ 
+                      color: COLORS.ai, 
+                      weight: 1.5,
+                      opacity: 0.8,
+                      className: 'road-flow neon-glow-ai'
+                    }}
+                  />
+                )}
+              </div>
             );
           })}
 
           {/* ══════ Intersection Signal Hubs ══════ */}
           {data?.intersections?.map((inter) => {
             const signalColor = getSignalColor(inter);
+            const isSelected = selectedNodeId === inter.id;
+            const glowClass = isSelected ? 'neon-glow-fast' : 'neon-glow-node';
             return (
               <CircleMarker 
                 key={`signal-${inter.id}`}
                 center={[inter.lat, inter.lon]}
-                radius={12}
+                radius={isSelected ? 16 : 12}
+                eventHandlers={{
+                  click: () => { setSelectedNodeId(isSelected ? null : inter.id); }
+                }}
                 pathOptions={{
                   fillColor: signalColor,
                   fillOpacity: 1.0,
-                  color: '#ffffff',
-                  weight: 3,
+                  color: isSelected ? '#FFFFFF' : '#ffffff',
+                  weight: isSelected ? 4 : 2,
                   opacity: 0.9,
+                  className: glowClass
                 }}
               >
-                <Tooltip direction="top">
-                  NODE {inter.id.toString().slice(-4)} • {inter.green_dirs?.join('/')} GREEN
-                </Tooltip>
               </CircleMarker>
             );
           })}
@@ -268,7 +311,42 @@ export default function Dashboard() {
             );
           })}
 
-          {/* ══════ Vehicles — GLOWING dots ══════ */}
+          {/* ══════ Pedestrian Crossings (All-Red) ══════ */}
+          {data?.pedestrians?.map((p_node) => {
+             const inter = data?.intersections?.find(i => i.id === p_node);
+             if (!inter) return null;
+             return (
+               <CircleMarker 
+                  key={`ped-${p_node}`}
+                  center={[inter.lat, inter.lon]}
+                  radius={20}
+                  pathOptions={{
+                    fillColor: '#FFFFFF',
+                    fillOpacity: 0.6,
+                    color: '#FFFFFF',
+                    weight: 2,
+                    dashArray: '4, 4',
+                    className: 'animate-spin'
+                  }}
+               />
+             )
+          })}
+
+          {/* ══════ EVP Corridors (Ambulance Overrides) ══════ */}
+          {data?.evp_routes?.map((pathCoords, i) => (
+             <Polyline 
+               key={`evp-${i}`}
+               positions={pathCoords}
+               pathOptions={{
+                 color: '#FF0055',
+                 weight: 6,
+                 opacity: 0.8,
+                 className: 'animate-pulse drop-shadow-[0_0_15px_rgba(255,0,85,0.8)]'
+               }}
+             />
+          ))}
+
+          {/* ══════ Vehicles & Incidents ══════ */}
           {(() => {
             // Build a fast edge lookup: "from_to" -> edge (first match)
             const edgeMap = {};
@@ -278,41 +356,74 @@ export default function Dashboard() {
                 if (!edgeMap[key]) edgeMap[key] = e;
               }
             }
-
-            return data?.vehicles?.map((v) => {
-              const edgeKey = `${v.from}_${v.to}`;
-              const edge = edgeMap[edgeKey];
+            
+            const interpolatePath = (edge, pos, edgeLen = 10) => {
               if (!edge?.path?.length || edge.path.length < 2) return null;
-
-              // Clamp progress to [0, 1] to prevent overshoot
-              const progress = Math.max(0, Math.min(v.pos / Math.max(v.length, 0.1), 1.0));
+              const progress = Math.max(0, Math.min(pos / Math.max(edgeLen, 0.1), 1.0));
               const maxIdx = edge.path.length - 1;
               const rawIdx = progress * maxIdx;
               const pathIdx = Math.min(Math.floor(rawIdx), maxIdx - 1);
               const nextIdx = pathIdx + 1;
               const subProgress = rawIdx - pathIdx;
-              
               const p1 = edge.path[pathIdx];
               const p2 = edge.path[nextIdx];
               if (!p1 || !p2) return null;
-
-              const currentPos = [
+              return [
                 p1[0] + (p2[0] - p1[0]) * subProgress,
                 p1[1] + (p2[1] - p1[1]) * subProgress
               ];
+            };
+
+            const incidentMarkers = data?.incidents?.map((inc, i) => {
+               const edgeKey = `${inc.from}_${inc.to}`;
+               const edge = edgeMap[edgeKey];
+               if (!edge) return null;
+               // Estimate edge length. We don't have exact length here, fallback to 50
+               const pos = interpolatePath(edge, inc.pos, 50);
+               if (!pos) return null;
+               return (
+                 <CircleMarker 
+                   key={`inc-${i}`}
+                   center={pos}
+                   radius={14}
+                   pathOptions={{
+                     fillColor: '#FF0000', fillOpacity: 0.8, color: '#FFFFFF', weight: 2, className: 'animate-ping'
+                   }}
+                 />
+               );
+            });
+
+            const vehicleMarkers = data?.vehicles?.map((v) => {
+              const edgeKey = `${v.from}_${v.to}`;
+              const edge = edgeMap[edgeKey];
+              const currentPos = interpolatePath(edge, v.pos, Math.max(v.edge_length || 10, 0.1));
+              if (!currentPos) return null;
 
               // Sanity check — reject positions wildly off Mumbai
               if (Math.abs(currentPos[0] - 19.076) > 0.05 || Math.abs(currentPos[1] - 72.878) > 0.05) return null;
 
               const speed = v.speed || 0;
-              const vColor = getVehicleColor(speed);
-              const glowClass = getVehicleGlowClass(speed);
+              let vColor = getVehicleColor(speed);
+              let glowClass = getVehicleGlowClass(speed);
+              let renderRadius = 6;
+              
+              if (v.type === 'truck') {
+                  renderRadius = 9;
+                  vColor = '#FF8C42'; 
+              } else if (v.type === 'bus') {
+                  renderRadius = 10;
+                  vColor = '#FFD166'; 
+              } else if (v.type === 'emergency') {
+                  renderRadius = 8;
+                  vColor = '#FF0055'; 
+                  glowClass = 'neon-glow-congested animate-pulse';
+              }
 
               return (
                 <CircleMarker 
                   key={`v-${v.id}`}
                   center={currentPos}
-                  radius={6}
+                  radius={renderRadius}
                   pathOptions={{ 
                     fillColor: vColor, 
                     fillOpacity: 1, 
@@ -324,6 +435,8 @@ export default function Dashboard() {
                 />
               );
             });
+            
+            return <>{incidentMarkers}{vehicleMarkers}</>;
           })()}
         </OptiMap>
 
@@ -335,9 +448,9 @@ export default function Dashboard() {
         {/* ─── HUD: Top Left ─── */}
         <div className="absolute top-6 left-6 z-[1000] flex flex-col gap-3 pointer-events-none">
           <StatusBadge status={status} />
-          <div className="glass-card px-4 py-2 rounded-xl flex items-center gap-2.5">
-            <Radio className="w-3.5 h-3.5 text-[#00FFAA] animate-pulse" />
-            <span className="hud-tag text-[#00FFAA]/80">Neural Network v3.2</span>
+          <div className="glass-card px-4 py-2 rounded-xl flex items-center gap-2.5 border-l-[3px] border-l-[#00FFC6]">
+            <Radio className="w-3.5 h-3.5 text-[#00FFC6] animate-pulse glow-icon" />
+            <span className="hud-tag text-[#00FFC6] text-cyber-glow glitch">Neural Network v3.2</span>
           </div>
           <CongestionIndicator level={congestionLevel} />
         </div>
@@ -354,9 +467,9 @@ export default function Dashboard() {
 
         {/* ─── HUD: Top Right — Live indicator ─── */}
         <div className="absolute top-6 right-[calc(380px+24px)] z-[1000] pointer-events-none">
-          <div className="glass-card px-4 py-2 rounded-xl flex items-center gap-2">
-            <div className="w-2 h-2 rounded-full bg-red-500 animate-pulse shadow-[0_0_8px_rgba(239,68,68,0.6)]" />
-            <span className="hud-tag text-red-400/90">LIVE</span>
+          <div className="glass-card px-4 py-2 rounded-xl flex items-center gap-2 border-l-[3px] border-l-[#FF3B3B]">
+            <div className="w-2 h-2 rounded-full bg-[#FF3B3B] animate-pulse neon-glow-congested" />
+            <span className="hud-tag text-[#FF3B3B] text-cyber-glow glitch" style={{ animationDelay: '0.5s' }}>LIVE</span>
           </div>
         </div>
       </div>
@@ -367,15 +480,15 @@ export default function Dashboard() {
         {/* Header */}
         <div className="mb-4">
           <div className="flex items-center gap-2 mb-2">
-            <div className="w-6 h-6 bg-[#4CC9F0] rounded-lg flex items-center justify-center">
-              <BarChart3 className="w-4 h-4 text-[#020617]" />
+            <div className="w-6 h-6 bg-[var(--c-node)] rounded-lg flex items-center justify-center neon-glow-node">
+              <BarChart3 className="w-4 h-4 text-[#000]" />
             </div>
-            <span className="hud-tag text-[#4CC9F0]">OptiFlow Command</span>
+            <span className="hud-tag text-[var(--c-node)] text-cyber-glow">OptiFlow Command</span>
           </div>
-          <h1 className="text-3xl font-black italic tracking-tighter text-white contrast-200 uppercase leading-none">
-            Traffic<br/>Intelligence
+          <h1 className="text-3xl font-black italic tracking-tighter text-white contrast-200 uppercase leading-none drop-shadow-md">
+            Traffic<br/><span className="text-[var(--c-fast)] text-cyber-glow">Intelligence</span>
           </h1>
-          <div className="mt-2 h-px w-16 bg-gradient-to-r from-[#4CC9F0] to-transparent" />
+          <div className="mt-2 h-[2px] w-16 bg-gradient-to-r from-[var(--c-fast)] to-[var(--c-medium)] neon-glow-fast" />
         </div>
 
         {/* Metrics Grid */}
@@ -417,29 +530,97 @@ export default function Dashboard() {
           />
         </div>
 
-        {/* AI Status Footer */}
-        <div className="mt-auto space-y-3">
-          <div className="glass-card p-5 rounded-2xl flex items-center gap-4 border-[#9B5DE5]/15 hover:border-[#9B5DE5]/30 transition-colors">
-            <div className="p-2.5 bg-[#9B5DE5]/10 rounded-xl">
-              <Cpu className="w-5 h-5 text-[#9B5DE5]" />
-            </div>
-            <div>
-              <p className="hud-tag mb-1">Decision Engine</p>
-              <p className="text-sm font-bold text-[#9B5DE5] italic tracking-tight">DQN Multi-Agent Active</p>
-            </div>
-            <div className="ml-auto w-2 h-2 rounded-full bg-[#00FFAA] shadow-[0_0_8px_rgba(0,255,170,0.6)] animate-pulse" />
-          </div>
+        {/* Node Override & Analytics */}
+        {(() => {
+           const sNode = data?.intersections?.find(n => n.id === selectedNodeId);
+           return (
+             <div className="flex flex-col gap-4 mt-auto">
+               {sNode ? (
+                 <div className={`glass-card p-4 rounded-xl border-l-[3px] ${sNode.is_overridden ? 'border-l-[#FF3B3B]' : 'border-l-[#FF00FF]'}`}>
+                   <h3 className="text-[#FF00FF] font-bold uppercase tracking-widest text-xs mb-3 flex items-center gap-2">
+                     <Crosshair className="w-4 h-4" /> NODE {sNode.id.toString().slice(-4)} {sNode.is_overridden ? '(OVERRIDDEN)' : ''}
+                   </h3>
+                   
+                   {/* EVP OVERRIDE INDICATOR */}
+                   {sNode.is_evp && (
+                     <div className="mb-4 p-2 bg-[#FF0055]/20 border border-[#FF0055] rounded-xl text-center shadow-[0_0_15px_rgba(255,0,85,0.4)] animate-pulse">
+                       <p className="font-bold text-[#FF0055] uppercase tracking-widest text-[10px] flex items-center justify-center gap-1">
+                         <AlertCircle className="w-3 h-3" /> EVP ACTIVE
+                       </p>
+                     </div>
+                   )}
 
-          <div className="glass-card p-5 rounded-2xl flex items-center gap-4 border-[#4CC9F0]/15">
-            <div className="p-2.5 bg-[#4CC9F0]/10 rounded-xl">
-              <Eye className="w-5 h-5 text-[#4CC9F0]" />
-            </div>
-            <div>
-              <p className="hud-tag mb-1">Camera Mode</p>
-              <p className="text-sm font-bold text-[#4CC9F0]/80 italic tracking-tight">Auto-Track Congestion</p>
-            </div>
-          </div>
-        </div>
+                   {/* Manual Override Controls */}
+                   <div className="flex gap-2 mb-4">
+                     <button className="flex-1 bg-white/10 hover:bg-white/20 text-[#00FFC6] font-bold text-[10px] py-1.5 rounded transition-colors" onClick={() => wsRef.current?.send(JSON.stringify({type: 'OVERRIDE', node_id: sNode.id, action: 0}))}>N/S GREEN</button>
+                     <button className="flex-1 bg-white/10 hover:bg-white/20 text-[#FF00FF] font-bold text-[10px] py-1.5 rounded transition-colors" onClick={() => wsRef.current?.send(JSON.stringify({type: 'OVERRIDE', node_id: sNode.id, action: 1}))}>E/W GREEN</button>
+                     <button className="flex-1 bg-[#FF3B3B]/20 hover:bg-[#FF3B3B]/40 text-[#FF3B3B] font-bold text-[10px] py-1.5 rounded transition-colors" onClick={() => wsRef.current?.send(JSON.stringify({type: 'OVERRIDE', node_id: sNode.id, action: -1}))}>AUTO AI</button>
+                   </div>
+                   
+                   {/* Q-Value Readout */}
+                   {sNode.q_values && (
+                     <div className="mt-2">
+                       <p className="text-[10px] text-slate-400 mb-1 tracking-widest uppercase">Agent Inner Policy (Q-Values)</p>
+                       <div className="flex justify-between items-center bg-[#000]/40 px-3 py-2 rounded border border-white/5">
+                         <span className="text-[#00FFC6] font-mono text-xs">N/S: {sNode.q_values[0].toFixed(2)}</span>
+                         <div className="w-px h-3 bg-white/20" />
+                         <span className="text-[#FF00FF] font-mono text-xs">E/W: {sNode.q_values[1].toFixed(2)}</span>
+                       </div>
+                     </div>
+                   )}
+                 </div>
+               ) : (
+                 <div className="glass-card p-4 rounded-xl border border-white/5 opacity-50 flex items-center gap-3">
+                   <Radio className="w-4 h-4 text-slate-500" />
+                   <p className="text-xs text-slate-500 uppercase tracking-widest leading-tight">Select map node<br/>to grant God Mode</p>
+                 </div>
+               )}
+
+               {/* Environment Controls */}
+               <div className="glass-card p-4 rounded-xl border border-white/5">
+                 <h3 className="text-[#4CC9F0] font-bold uppercase tracking-widest text-xs mb-3 flex items-center gap-2">
+                   <Layers className="w-4 h-4" /> Global Climate
+                 </h3>
+                 <div className="flex gap-2">
+                    <button className={`flex-1 font-bold text-[10px] py-1.5 rounded transition-colors ${data?.weather === 'clear' ? 'bg-[#4CC9F0] text-black drop-shadow-[0_0_10px_rgba(76,201,240,0.8)]' : 'bg-white/10 text-white'}`} onClick={() => wsRef.current?.send(JSON.stringify({type: 'WEATHER', condition: 'clear'}))}>CLEAR</button>
+                    <button className={`flex-1 font-bold text-[10px] py-1.5 rounded transition-colors ${data?.weather === 'rain' ? 'bg-[#4CC9F0] text-black drop-shadow-[0_0_10px_rgba(76,201,240,0.8)]' : 'bg-white/10 text-white'}`} onClick={() => wsRef.current?.send(JSON.stringify({type: 'WEATHER', condition: 'rain'}))}>RAIN</button>
+                    <button className={`flex-1 font-bold text-[10px] py-1.5 rounded transition-colors ${data?.weather === 'storm' ? 'bg-[#4CC9F0] text-black drop-shadow-[0_0_10px_rgba(76,201,240,0.8)]' : 'bg-white/10 text-white'}`} onClick={() => wsRef.current?.send(JSON.stringify({type: 'WEATHER', condition: 'storm'}))}>STORM</button>
+                 </div>
+                 <h3 className="text-[#FF3B3B] font-bold uppercase tracking-widest text-xs mt-4 mb-3 flex items-center gap-2">
+                   <AlertCircle className="w-4 h-4" /> Hazard Injection
+                 </h3>
+                 <div className="flex gap-2">
+                     <button className="w-1/2 bg-[#FF3B3B]/20 hover:bg-[#FF3B3B]/40 text-[#FF3B3B] font-bold text-[10px] py-1.5 rounded transition-colors" onClick={() => wsRef.current?.send(JSON.stringify({type: 'TOGGLE_RANDOM_INCIDENTS'}))}>SPAWN RANDOM</button>
+                     <button className="w-1/2 bg-white/10 hover:bg-[#FF3B3B]/40 text-[#FF3B3B] font-bold text-[10px] py-1.5 rounded transition-colors" onClick={() => wsRef.current?.send(JSON.stringify({type: 'CLEAR_INCIDENTS'}))}>CLEAR ALL</button>
+                 </div>
+                 <p className="text-[9px] text-slate-500 mt-2 uppercase tracking-widest leading-tight">Click on any road path on the map to manually inject an incident.</p>
+               </div>
+
+               {/* Live Chart */}
+               {history.length > 0 && (
+                 <div className="glass-card p-4 rounded-xl border border-white/5 h-48 flex flex-col">
+                   <p className="text-[10px] text-slate-400 mb-2 uppercase tracking-widest w-full flex justify-between">
+                     <span>Global Telemetry</span>
+                     <span className="text-[#4CC9F0]">Spd</span> | <span className="text-[#FF4D4D]">Wait</span>
+                   </p>
+                   <div className="flex-1 min-h-0">
+                     <ResponsiveContainer width="100%" height="100%">
+                       <LineChart data={history}>
+                         <CartesianGrid strokeDasharray="3 3" stroke="#ffffff10" vertical={false} />
+                         <XAxis dataKey="time" hide />
+                         <YAxis yAxisId="left" stroke="#4CC9F0" tick={{fontSize: 9}} width={30} axisLine={false} tickLine={false} />
+                         <YAxis yAxisId="right" orientation="right" stroke="#FF4D4D" tick={{fontSize: 9}} width={30} axisLine={false} tickLine={false} />
+                         <RechartsTooltip contentStyle={{backgroundColor: '#050A15', borderColor: '#ffffff20', color: '#fff'}} itemStyle={{fontSize: '12px'}} labelStyle={{display: 'none'}} />
+                         <Line yAxisId="left" type="monotone" dataKey="speed" stroke="#4CC9F0" strokeWidth={2} dot={false} isAnimationActive={false} />
+                         <Line yAxisId="right" type="monotone" dataKey="wait" stroke="#FF4D4D" strokeWidth={2} dot={false} isAnimationActive={false} />
+                       </LineChart>
+                     </ResponsiveContainer>
+                   </div>
+                 </div>
+               )}
+             </div>
+           );
+        })()}
 
         {/* Error Overlay */}
         {socketError && (
@@ -483,33 +664,33 @@ function StatCard({ icon, label, value, unit, accentColor }) {
 
 function StatusBadge({ status }) {
   const configs = {
-    connected:    { color: 'bg-[#00FFAA] shadow-[0_0_10px_rgba(0,255,170,0.5)]', text: 'Bridge Sync: Strong' },
-    connecting:   { color: 'bg-[#FFD166] shadow-[0_0_10px_rgba(255,209,102,0.5)]', text: 'Initializing' },
-    reconnecting: { color: 'bg-[#FF4D4D] shadow-[0_0_10px_rgba(255,77,77,0.5)]', text: 'Signal Interference' },
+    connected:    { color: 'bg-[var(--c-fast)] neon-glow-fast', text: 'Bridge Sync: Strong' },
+    connecting:   { color: 'bg-[var(--c-yellow)] neon-glow-medium', text: 'Initializing' },
+    reconnecting: { color: 'bg-[var(--c-congested)] neon-glow-congested', text: 'Signal Interference' },
     disconnected: { color: 'bg-slate-500', text: 'System Offline' }
   };
   const config = configs[status] || configs.disconnected;
 
   return (
-    <div className="glass-card px-4 py-2.5 rounded-xl flex items-center gap-3 border border-white/5 shadow-2xl">
+    <div className="glass-card px-4 py-2.5 rounded-xl flex items-center gap-3 border-l-[3px] border-l-white/20">
       <div className={`w-2 h-2 rounded-full ${config.color} animate-pulse`} />
-      <span className="hud-tag text-slate-200 leading-none">{config.text}</span>
+      <span className="hud-tag text-white leading-none text-cyber-glow">{config.text}</span>
     </div>
   );
 }
 
 function CongestionIndicator({ level }) {
   const configs = {
-    optimal:  { color: '#00FFAA', label: 'OPTIMAL FLOW' },
-    elevated: { color: '#FFD166', label: 'ELEVATED LOAD' },
-    critical: { color: '#FF4D4D', label: 'CRITICAL CONGESTION' },
+    optimal:  { color: 'var(--c-fast)', label: 'OPTIMAL FLOW', glow: 'neon-glow-fast' },
+    elevated: { color: 'var(--c-medium)', label: 'ELEVATED LOAD', glow: 'neon-glow-medium' },
+    critical: { color: 'var(--c-congested)', label: 'CRITICAL OVERLOAD', glow: 'neon-glow-congested' },
   };
   const c = configs[level] || configs.optimal;
 
   return (
-    <div className="glass-card px-4 py-2 rounded-xl flex items-center gap-2.5">
-      <Crosshair className="w-3.5 h-3.5" style={{ color: c.color }} />
-      <span className="hud-tag" style={{ color: c.color }}>{c.label}</span>
+    <div className="glass-card px-4 py-2 rounded-xl flex items-center gap-2.5 border-l-[3px]" style={{ borderColor: c.color }}>
+      <Crosshair className={`w-3.5 h-3.5 ${c.glow}`} style={{ color: c.color }} />
+      <span className={`hud-tag text-cyber-glow ${c.glow}`} style={{ color: c.color }}>{c.label}</span>
     </div>
   );
 }

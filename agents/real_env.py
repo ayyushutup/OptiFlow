@@ -49,18 +49,27 @@ class RealTrafficEnv:
             self.register_signal(node_id)
             
         bins = self.signal_configs[node_id]
-        state = []
+        state_local = []
+        state_upstream = []
+        
         for direction in ['N', 'S', 'E', 'W']:
-            count = 0
+            count_local = 0
+            count_upstream = 0
             edges = bins[direction]
             for v, u in edges:
-                # Count vehicles currently on this edge and close to intersection
-                count += sum(1 for veh in vehicles 
-                             if veh['from'] == v and veh['to'] == u 
-                             and (veh['length'] - veh['pos']) < 30) # within 30m
-            state.append(count)
+                for veh in vehicles:
+                    if veh['from'] == v and veh['to'] == u:
+                        edge_len = veh.get('edge_length', veh.get('length', 10))
+                        dist_to_intersection = edge_len - veh['pos']
+                        if dist_to_intersection < 30:
+                            count_local += 1
+                        elif dist_to_intersection < 150:
+                            count_upstream += 1
+            state_local.append(count_local)
+            state_upstream.append(count_upstream)
             
-        # Normalize (clipping at 10 for state stability)
+        # Combine and normalize
+        state = state_local + state_upstream
         return np.clip(np.array(state, dtype=np.float32) / 10.0, 0, 1.0)
 
     def get_reward(self, node_id, vehicles):
@@ -74,6 +83,7 @@ class RealTrafficEnv:
         bins = self.signal_configs[node_id]
         total_waiting_time = 0
         queue_penalty = 0
+        emergency_waiting = False
         
         # Calculate penalty across all incoming arms
         for direction in ['N', 'S', 'E', 'W']:
@@ -82,16 +92,23 @@ class RealTrafficEnv:
             edges = bins[direction]
             for v, u in edges:
                 for veh in vehicles:
-                    if veh['from'] == v and veh['to'] == u and (veh['length'] - veh['pos']) < 30:
+                    # Note: backwards compatibility with old 'length' key
+                    edge_len = veh.get('edge_length', veh.get('length', 10))
+                    if veh['from'] == v and veh['to'] == u and (edge_len - veh['pos']) < 30:
                         count += 1
                         dir_wait += veh.get('waiting_time', 0)
+                        if veh.get('type') == 'emergency' and veh.get('speed', 20) < 0.5:
+                            emergency_waiting = True
             
             queue_penalty += count ** 2
             total_waiting_time += dir_wait
 
         # Scale waiting time to be comparable to queue penalty
-        # (1s of waiting ~ 0.5 unit of penalty, adjustable)
         reward = -(queue_penalty + (total_waiting_time * 0.5))
+        
+        if emergency_waiting:
+            reward *= 100.0  # Massive penalty for blocking an ambulance/fire truck
+            
         return float(reward)
 
     def get_green_dirs(self, node_id, action):
