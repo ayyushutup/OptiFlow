@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, useCallback, memo } from 'react';
 import { MapContainer, TileLayer, CircleMarker, Polyline, useMap, Tooltip } from 'react-leaflet';
-import { Activity, Clock, Navigation, BarChart3, Radio, Database, AlertCircle, Cpu, Zap, Gauge, OctagonX, Map as MapIcon, Layers } from 'lucide-react';
+import { Activity, Clock, Navigation, BarChart3, Radio, AlertCircle, Cpu, Zap, Gauge, OctagonX, Crosshair, Layers, Eye } from 'lucide-react';
 import L from 'leaflet';
 import './index.css';
 
@@ -18,39 +18,82 @@ const API_URL = 'http://localhost:8000';
 
 const MUMBAI_CENTER = [19.0760, 72.8777];
 
+// ─── Color System (strict, cinematic) ───
+const COLORS = {
+  fast:      '#00FFAA',
+  medium:    '#FFD166',
+  congested: '#FF4D4D',
+  node:      '#4CC9F0',
+  ai:        '#9B5DE5',
+  roadBase:  '#1a2536',
+  roadEmpty: '#111b2a',
+  nsGreen:   '#00FFAA',
+  ewGreen:   '#FF6B9D',
+  yellow:    '#FFD166',
+};
+
 /**
- * Force Leaflet to re-calculate container size after the initial layout stabilizes.
+ * Force Leaflet to re-calculate container size after initial layout.
  */
 function ResizeFix() {
   const map = useMap();
   useEffect(() => {
-    const timer = setTimeout(() => {
-      map.invalidateSize();
-    }, 450); // Using 450ms as verified in sanity test
+    const timer = setTimeout(() => map.invalidateSize(), 450);
     return () => clearTimeout(timer);
   }, [map]);
   return null;
 }
 
-// Heatmap color helper: 0 vehicles = dark, 1 = green, 2-3 = yellow, 4+ = red
+
+
+// ─── Congestion helpers (upgraded color system) ───
 function getEdgeCongestionColor(count) {
-  if (!count || count === 0) return '#1e293b';
-  if (count === 1) return '#22c55e';
-  if (count === 2) return '#eab308';
-  if (count === 3) return '#f97316';
-  return '#ef4444';
-}
-function getEdgeCongestionWeight(count) {
-  if (!count || count === 0) return 2;
-  return Math.min(2 + count * 1.5, 8);
-}
-function getEdgeCongestionOpacity(count) {
-  if (!count || count === 0) return 0.3;
-  return Math.min(0.4 + count * 0.15, 1.0);
+  if (!count || count === 0) return COLORS.roadEmpty;
+  if (count === 1) return COLORS.fast;
+  if (count === 2) return COLORS.medium;
+  if (count === 3) return '#FF8C42'; // orange transition
+  return COLORS.congested;
 }
 
-// MEMOIZED MAP COMPONENT - Ensures the core map doesn't re-render on telemetry ticks
-const OptiMap = memo(({ mapData, children }) => {
+function getEdgeCongestionWeight(count) {
+  if (!count || count === 0) return 3;
+  return Math.min(3 + count * 1.8, 10);
+}
+
+function getEdgeCongestionOpacity(count) {
+  if (!count || count === 0) return 0.35;
+  return Math.min(0.55 + count * 0.14, 1.0);
+}
+
+function getEdgeGlowClass(count) {
+  if (!count || count === 0) return '';
+  if (count <= 1) return 'road-glow';
+  if (count <= 2) return 'road-glow-medium';
+  return 'road-glow-congested';
+}
+
+// Vehicle color (strict palette)
+function getVehicleColor(speed) {
+  if (speed < 0.5) return COLORS.congested;
+  if (speed < 5) return COLORS.medium;
+  return COLORS.fast;
+}
+
+function getVehicleGlowClass(speed) {
+  if (speed < 0.5) return 'vehicle-glow-stopped';
+  if (speed < 5) return 'vehicle-glow-medium';
+  return 'vehicle-glow-fast';
+}
+
+// Signal color
+function getSignalColor(inter) {
+  if (inter.is_yellow) return COLORS.yellow;
+  if (inter.green_dirs?.includes('N') || inter.green_dirs?.includes('S')) return COLORS.nsGreen;
+  return COLORS.ewGreen;
+}
+
+// ─── MEMOIZED MAP CORE ───
+const OptiMap = memo(({ children }) => {
   return (
     <MapContainer 
       center={MUMBAI_CENTER} 
@@ -62,9 +105,9 @@ const OptiMap = memo(({ mapData, children }) => {
       zoomControl={false}
       attributionControl={false}
     >
+      {/* 🎯 #1: Carto Dark Matter NO LABELS — kills the "civilian" look */}
       <TileLayer
-        url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
-        attribution="&copy; <a href='https://www.openstreetmap.org/copyright'>OpenStreetMap</a> contributors &copy; <a href='https://carto.com/attributions'>CARTO</a>"
+        url="https://{s}.basemaps.cartocdn.com/dark_nolabels/{z}/{x}/{y}{r}.png"
         subdomains="abcd"
         maxZoom={20}
       />
@@ -74,6 +117,7 @@ const OptiMap = memo(({ mapData, children }) => {
   );
 });
 
+// ─── MAIN DASHBOARD ───
 export default function Dashboard() {
   const [data, setData] = useState(null);
   const [mapData, setMapData] = useState(null);
@@ -95,7 +139,7 @@ export default function Dashboard() {
     fetchMap();
   }, []);
 
-  // 🛰️ 2. Stable WebSocket Lifecycle
+  // 🛰️ 2. WebSocket Lifecycle
   useEffect(() => {
     let ws = null;
     let reconnectTimer = null;
@@ -138,172 +182,271 @@ export default function Dashboard() {
   }, []);
 
   const metrics = data?.metrics || {};
+  const congestionLevel = metrics.stopped_vehicles > 20 ? 'critical' : metrics.stopped_vehicles > 8 ? 'elevated' : 'optimal';
 
   return (
     <div className="flex w-screen h-screen bg-[#020617] font-sans selection:bg-sky-500/30 overflow-hidden">
       
-      {/* Simulation View (75%) */}
+      {/* ══════════ Simulation View (75%) ══════════ */}
       <div className="flex-[3] min-h-0 relative shadow-[inset_-30px_0_50px_rgba(0,0,0,0.8)]">
-         <OptiMap mapData={mapData}>
 
-           {/* ROAD HEATMAP (dynamic edges colored by congestion) */}
-           {mapData?.edges?.map((edge, idx) => {
-              const congestionKey = `${edge.from}_${edge.to}`;
-              const count = data?.edge_congestion?.[congestionKey] || 0;
-              return (
-                <Polyline 
-                  key={`heat-${idx}`}
-                  positions={edge.path}
-                  pathOptions={{ 
-                    color: getEdgeCongestionColor(count), 
-                    weight: getEdgeCongestionWeight(count),
-                    opacity: getEdgeCongestionOpacity(count)
-                  }}
-                />
-              );
-           })}
+        <OptiMap>
 
-           {/* INTERSECTIONS */}
-           {data?.intersections?.map((inter) => (
-             <CircleMarker 
+
+          {/* ════ Layer 1: Road Base (dark, structural) ══════ */}
+          {mapData?.edges?.map((edge, idx) => (
+            <Polyline 
+              key={`base-${idx}`}
+              positions={edge.path}
+              pathOptions={{ 
+                color: COLORS.roadBase, 
+                weight: 4,
+                opacity: 0.5
+              }}
+            />
+          ))}
+
+          {/* ════ Layer 2: Traffic Congestion Overlay (glowing) ══════ */}
+          {mapData?.edges?.map((edge, idx) => {
+            const congestionKey = `${edge.from}_${edge.to}`;
+            const count = data?.edge_congestion?.[congestionKey] || 0;
+            return (
+              <Polyline 
+                key={`heat-${idx}`}
+                positions={edge.path}
+                pathOptions={{ 
+                  color: getEdgeCongestionColor(count), 
+                  weight: getEdgeCongestionWeight(count),
+                  opacity: getEdgeCongestionOpacity(count),
+                  className: getEdgeGlowClass(count),
+                  lineCap: 'round',
+                  lineJoin: 'round'
+                }}
+              />
+            );
+          })}
+
+          {/* ══════ Intersection Signal Hubs ══════ */}
+          {data?.intersections?.map((inter) => {
+            const signalColor = getSignalColor(inter);
+            return (
+              <CircleMarker 
                 key={`signal-${inter.id}`}
                 center={[inter.lat, inter.lon]}
-                radius={10}
+                radius={12}
                 pathOptions={{
-                  fillColor: inter.is_yellow ? '#fbbf24' : (inter.green_dirs?.includes('N') || inter.green_dirs?.includes('S') ? '#10b981' : '#f43f5e'),
+                  fillColor: signalColor,
                   fillOpacity: 1.0,
-                  color: '#fff',
-                  weight: 2
+                  color: '#ffffff',
+                  weight: 3,
+                  opacity: 0.9,
                 }}
               >
-                <Tooltip direction="top" className="bg-slate-900 border-none text-[9px] font-black text-white px-2 py-0.5 rounded-sm opacity-80">
-                   NODE {inter.id.toString().slice(-4)}
+                <Tooltip direction="top">
+                  NODE {inter.id.toString().slice(-4)} • {inter.green_dirs?.join('/')} GREEN
                 </Tooltip>
-             </CircleMarker>
-           ))}
+              </CircleMarker>
+            );
+          })}
 
-           {/* VEHICLES (color by speed) */}
-           {data?.vehicles?.map((v) => {
-              const edge = mapData?.edges?.find(e => e.from === v.from && e.to === v.to);
-              if (!edge || !edge.path) return null;
+          {/* ══════ Outer pulse ring for each signal (bigger, fading) ══════ */}
+          {data?.intersections?.map((inter) => {
+            const signalColor = getSignalColor(inter);
+            return (
+              <CircleMarker 
+                key={`pulse-${inter.id}`}
+                center={[inter.lat, inter.lon]}
+                radius={22}
+                pathOptions={{
+                  fillColor: 'transparent',
+                  fillOpacity: 0,
+                  color: signalColor,
+                  weight: 2,
+                  opacity: 0.3,
+                }}
+              />
+            );
+          })}
 
-              const progress = v.pos / v.length;
-              const pathIdx = Math.floor(progress * (edge.path.length - 1));
-              const nextIdx = Math.min(pathIdx + 1, edge.path.length - 1);
-              const subProgress = (progress * (edge.path.length - 1)) - pathIdx;
+          {/* ══════ Vehicles — GLOWING dots ══════ */}
+          {(() => {
+            // Build a fast edge lookup: "from_to" -> edge (first match)
+            const edgeMap = {};
+            if (mapData?.edges) {
+              for (const e of mapData.edges) {
+                const key = `${e.from}_${e.to}`;
+                if (!edgeMap[key]) edgeMap[key] = e;
+              }
+            }
+
+            return data?.vehicles?.map((v) => {
+              const edgeKey = `${v.from}_${v.to}`;
+              const edge = edgeMap[edgeKey];
+              if (!edge?.path?.length || edge.path.length < 2) return null;
+
+              // Clamp progress to [0, 1] to prevent overshoot
+              const progress = Math.max(0, Math.min(v.pos / Math.max(v.length, 0.1), 1.0));
+              const maxIdx = edge.path.length - 1;
+              const rawIdx = progress * maxIdx;
+              const pathIdx = Math.min(Math.floor(rawIdx), maxIdx - 1);
+              const nextIdx = pathIdx + 1;
+              const subProgress = rawIdx - pathIdx;
               
               const p1 = edge.path[pathIdx];
               const p2 = edge.path[nextIdx];
+              if (!p1 || !p2) return null;
+
               const currentPos = [
                 p1[0] + (p2[0] - p1[0]) * subProgress,
                 p1[1] + (p2[1] - p1[1]) * subProgress
               ];
 
-              // Color by speed: stopped = red, slow = amber, moving = cyan
+              // Sanity check — reject positions wildly off Mumbai
+              if (Math.abs(currentPos[0] - 19.076) > 0.05 || Math.abs(currentPos[1] - 72.878) > 0.05) return null;
+
               const speed = v.speed || 0;
-              const vColor = speed < 0.5 ? '#ef4444' : speed < 5 ? '#fbbf24' : '#38bdf8';
+              const vColor = getVehicleColor(speed);
+              const glowClass = getVehicleGlowClass(speed);
 
               return (
                 <CircleMarker 
                   key={`v-${v.id}`}
                   center={currentPos}
-                  radius={5}
-                  pathOptions={{ fillColor: vColor, fillOpacity: 1, color: '#fff', weight: 1.5 }}
+                  radius={6}
+                  pathOptions={{ 
+                    fillColor: vColor, 
+                    fillOpacity: 1, 
+                    color: '#ffffff', 
+                    weight: 2,
+                    opacity: 0.7,
+                    className: glowClass 
+                  }}
                 />
               );
-           })}
+            });
+          })()}
         </OptiMap>
 
-        {/* HUD Overlay */}
-        <div className="absolute top-8 left-8 z-[1000] flex flex-col gap-4 pointer-events-none">
+        {/* ─── Overlay Stack (vignette + grid + scanline) ─── */}
+        <div className="map-overlay-vignette" />
+        <div className="map-overlay-grid" />
+        <div className="map-overlay-scanline" />
+
+        {/* ─── HUD: Top Left ─── */}
+        <div className="absolute top-6 left-6 z-[1000] flex flex-col gap-3 pointer-events-none">
           <StatusBadge status={status} />
-          <div className="glass-card px-4 py-2 rounded-xl flex items-center gap-2 border-sky-400/20">
-            <Radio className="w-4 h-4 text-sky-400 animate-pulse" />
-            <span className="text-[10px] font-black tracking-widest uppercase text-sky-100">Neural Network v3.2</span>
+          <div className="glass-card px-4 py-2 rounded-xl flex items-center gap-2.5">
+            <Radio className="w-3.5 h-3.5 text-[#00FFAA] animate-pulse" />
+            <span className="hud-tag text-[#00FFAA]/80">Neural Network v3.2</span>
           </div>
+          <CongestionIndicator level={congestionLevel} />
         </div>
 
-        <div className="absolute bottom-8 left-8 z-[1000] glass-card p-4 rounded-2xl flex gap-6 text-[10px] font-black uppercase tracking-widest text-slate-400 shadow-2xl backdrop-blur-3xl border-white/5">
-           <div className="flex items-center gap-2"><div className="w-3.5 h-3.5 rounded-full bg-emerald-500 shadow-[0_0_10px_#10b981]"></div> NS Green</div>
-           <div className="flex items-center gap-2"><div className="w-3.5 h-3.5 rounded-full bg-rose-500 shadow-[0_0_10px_#f43f5e]"></div> EW Green</div>
-           <div className="flex items-center gap-2"><div className="w-3.5 h-3.5 rounded-full bg-sky-400 shadow-[0_0_10px_#38bdf8]"></div> Moving</div>
-           <div className="flex items-center gap-2"><div className="w-3.5 h-3.5 rounded-full bg-red-500 shadow-[0_0_10px_#ef4444]"></div> Stopped</div>
-           <div className="flex items-center gap-1.5">
-              <div className="flex gap-0.5">
-                <div className="w-3 h-3 rounded-sm bg-emerald-500"></div>
-                <div className="w-3 h-3 rounded-sm bg-yellow-500"></div>
-                <div className="w-3 h-3 rounded-sm bg-orange-500"></div>
-                <div className="w-3 h-3 rounded-sm bg-red-500"></div>
-              </div>
-              Congestion
-           </div>
+        {/* ─── HUD: Bottom Left Legend ─── */}
+        <div className="absolute bottom-6 left-6 z-[1000] glass-card p-4 rounded-2xl flex gap-5 items-center">
+          <LegendItem dotClass="legend-dot-fast" label="Fast" />
+          <LegendItem dotClass="legend-dot-medium" label="Medium" />
+          <LegendItem dotClass="legend-dot-congested" label="Congested" />
+          <div className="w-px h-5 bg-white/10" />
+          <LegendItem dotClass="legend-dot-node" label="Signal" />
+          <LegendItem dotClass="legend-dot-ai" label="AI" />
+        </div>
+
+        {/* ─── HUD: Top Right — Live indicator ─── */}
+        <div className="absolute top-6 right-[calc(380px+24px)] z-[1000] pointer-events-none">
+          <div className="glass-card px-4 py-2 rounded-xl flex items-center gap-2">
+            <div className="w-2 h-2 rounded-full bg-red-500 animate-pulse shadow-[0_0_8px_rgba(239,68,68,0.6)]" />
+            <span className="hud-tag text-red-400/90">LIVE</span>
+          </div>
         </div>
       </div>
 
-      {/* Analytics Sidebar (25%) */}
-      <div className="w-[380px] bg-[#0b1220] h-full overflow-auto flex flex-col gap-6 p-8 border-l border-white/5 relative z-[1001] shadow-2xl">
-        <div className="mb-6 pointer-events-none">
+      {/* ══════════ Analytics Sidebar (25%) ══════════ */}
+      <div className="w-[380px] bg-[#0a0f1a] h-full overflow-auto flex flex-col gap-5 p-7 border-l border-white/5 relative z-[1001] shadow-2xl">
+        
+        {/* Header */}
+        <div className="mb-4">
           <div className="flex items-center gap-2 mb-2">
-             <div className="w-6 h-6 bg-sky-500 rounded-lg flex items-center justify-center">
-                <BarChart3 className="w-4 h-4 text-[#020617]" />
-             </div>
-             <span className="text-[10px] font-black tracking-[0.3em] text-sky-500 uppercase">OptiFlow Advanced</span>
+            <div className="w-6 h-6 bg-[#4CC9F0] rounded-lg flex items-center justify-center">
+              <BarChart3 className="w-4 h-4 text-[#020617]" />
+            </div>
+            <span className="hud-tag text-[#4CC9F0]">OptiFlow Command</span>
           </div>
-          <h1 className="text-4xl font-black italic tracking-tighter text-white contrast-200 uppercase">
-             Dashboard
+          <h1 className="text-3xl font-black italic tracking-tighter text-white contrast-200 uppercase leading-none">
+            Traffic<br/>Intelligence
           </h1>
+          <div className="mt-2 h-px w-16 bg-gradient-to-r from-[#4CC9F0] to-transparent" />
         </div>
 
-        <div className="flex flex-col gap-4 pb-12">
+        {/* Metrics Grid */}
+        <div className="flex flex-col gap-3.5 pb-6">
           <StatCard 
-            icon={<Clock className="text-sky-400" />} 
+            icon={<Clock className="text-[#4CC9F0]" />} 
             label="Grid Runtime" 
-            value={metrics.step ? `${metrics.step} ticks` : "--"} 
-            hint="System clock"
+            value={metrics.step ? `${metrics.step}` : "--"} 
+            unit="ticks"
+            accentColor="#4CC9F0"
           />
           <StatCard 
-            icon={<Navigation className="text-emerald-400" />} 
+            icon={<Navigation className="text-[#00FFAA]" />} 
             label="Fleet Size" 
             value={metrics.active_vehicles || "0"} 
-            hint="Active nodes"
+            unit="active"
+            accentColor="#00FFAA"
           />
           <StatCard 
-            icon={<Gauge className="text-sky-400" />} 
+            icon={<Gauge className="text-[#9B5DE5]" />} 
             label="Avg Speed" 
-            value={metrics.avg_speed !== undefined ? `${metrics.avg_speed} m/s` : "--"} 
-            hint="Network flow"
+            value={metrics.avg_speed !== undefined ? `${metrics.avg_speed}` : "--"} 
+            unit="m/s"
+            accentColor="#9B5DE5"
           />
           <StatCard 
-            icon={<OctagonX className="text-amber-400" />} 
+            icon={<OctagonX className="text-[#FFD166]" />} 
             label="Stopped" 
             value={metrics.stopped_vehicles !== undefined ? metrics.stopped_vehicles : "--"} 
-            hint="At red lights"
+            unit="vehicles"
+            accentColor="#FFD166"
           />
           <StatCard 
-            icon={<Zap className="text-rose-400" />} 
+            icon={<Zap className="text-[#FF4D4D]" />} 
             label="Total Wait" 
-            value={metrics.total_waiting_time !== undefined ? `${metrics.total_waiting_time.toFixed(1)}s` : "--"} 
-            hint="Real accumulated"
+            value={metrics.total_waiting_time !== undefined ? `${metrics.total_waiting_time.toFixed(1)}` : "--"} 
+            unit="seconds"
+            accentColor="#FF4D4D"
           />
         </div>
 
-        <div className="mt-auto space-y-4">
-          <div className="glass-card p-6 rounded-3xl border-emerald-500/10 flex items-center gap-4">
-             <div className="p-3 bg-emerald-500/10 rounded-xl">
-                <Cpu className="w-6 h-6 text-emerald-400" />
-             </div>
-             <div>
-                <p className="text-[10px] text-slate-500 font-black uppercase tracking-widest leading-none mb-1.5">Decision Matrix</p>
-                <p className="text-sm font-bold text-emerald-100 italic tracking-tight underline decoration-emerald-500/30">DQN Multi-Agent Active</p>
-             </div>
+        {/* AI Status Footer */}
+        <div className="mt-auto space-y-3">
+          <div className="glass-card p-5 rounded-2xl flex items-center gap-4 border-[#9B5DE5]/15 hover:border-[#9B5DE5]/30 transition-colors">
+            <div className="p-2.5 bg-[#9B5DE5]/10 rounded-xl">
+              <Cpu className="w-5 h-5 text-[#9B5DE5]" />
+            </div>
+            <div>
+              <p className="hud-tag mb-1">Decision Engine</p>
+              <p className="text-sm font-bold text-[#9B5DE5] italic tracking-tight">DQN Multi-Agent Active</p>
+            </div>
+            <div className="ml-auto w-2 h-2 rounded-full bg-[#00FFAA] shadow-[0_0_8px_rgba(0,255,170,0.6)] animate-pulse" />
+          </div>
+
+          <div className="glass-card p-5 rounded-2xl flex items-center gap-4 border-[#4CC9F0]/15">
+            <div className="p-2.5 bg-[#4CC9F0]/10 rounded-xl">
+              <Eye className="w-5 h-5 text-[#4CC9F0]" />
+            </div>
+            <div>
+              <p className="hud-tag mb-1">Camera Mode</p>
+              <p className="text-sm font-bold text-[#4CC9F0]/80 italic tracking-tight">Auto-Track Congestion</p>
+            </div>
           </div>
         </div>
 
+        {/* Error Overlay */}
         {socketError && (
-          <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[85%] p-8 glass-card bg-rose-500/10 border-rose-500/40 rounded-[2.5rem] text-center backdrop-blur-3xl shadow-2xl">
-             <AlertCircle className="w-12 h-12 text-rose-500 mx-auto mb-4" />
-             <p className="text-xl font-black text-rose-100 mb-2 uppercase tracking-widest">Connection Error</p>
-             <p className="text-[11px] text-rose-300 font-bold leading-relaxed">{socketError}</p>
+          <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[85%] p-8 glass-card bg-rose-500/10 border-rose-500/40 rounded-[2.5rem] text-center backdrop-blur-3xl shadow-2xl z-50">
+            <AlertCircle className="w-12 h-12 text-rose-500 mx-auto mb-4" />
+            <p className="text-xl font-black text-rose-100 mb-2 uppercase tracking-widest">Connection Error</p>
+            <p className="text-[11px] text-rose-300 font-bold leading-relaxed">{socketError}</p>
           </div>
         )}
       </div>
@@ -311,36 +454,71 @@ export default function Dashboard() {
   );
 }
 
-function StatCard({ icon, label, value, hint }) {
+// ─── Sub-Components ───
+
+function StatCard({ icon, label, value, unit, accentColor }) {
   return (
-    <div className="glass-card p-7 rounded-[2.5rem] transition-all hover:bg-slate-800/40 border border-white/5 relative group">
-      <div className="flex justify-between items-start relative z-10">
-        <div className="p-3 bg-slate-900 rounded-xl border border-white/5 group-hover:border-sky-500/20">
-          {icon}
-        </div>
-        <div className="text-right">
-          <p className="text-[10px] font-black text-slate-600 uppercase tracking-widest mb-1">{hint}</p>
-          <p className="text-xs font-black text-slate-400 uppercase tracking-widest leading-none">{label}</p>
+    <div className="glass-card stat-card-glow p-5 rounded-2xl border border-white/5 relative group overflow-hidden">
+      {/* Accent line */}
+      <div className="absolute top-0 left-0 w-1 h-full rounded-r-full opacity-40 transition-opacity group-hover:opacity-80"
+           style={{ background: accentColor }} />
+      
+      <div className="flex justify-between items-center relative z-10 pl-3">
+        <div className="flex items-center gap-3">
+          <div className="p-2 bg-white/5 rounded-lg border border-white/5 group-hover:border-white/10 transition-colors">
+            {icon}
+          </div>
+          <div>
+            <p className="hud-tag text-slate-500 mb-0.5">{label}</p>
+            <div className="flex items-baseline gap-1.5">
+              <span className="text-2xl font-light text-white tabular-nums tracking-tight">{value}</span>
+              {unit && <span className="text-[9px] font-bold text-slate-600 uppercase tracking-widest">{unit}</span>}
+            </div>
+          </div>
         </div>
       </div>
-      <p className="text-4xl font-light text-slate-50 mt-6 tabular-nums tracking-tighter">{value}</p>
     </div>
   );
 }
 
 function StatusBadge({ status }) {
   const configs = {
-    connected: { color: 'bg-emerald-500 shadow-emerald-500/40', text: 'Bridge Sync: Strong' },
-    connecting: { color: 'bg-amber-500 shadow-amber-500/40', text: 'Initializing' },
-    reconnecting: { color: 'bg-rose-500 shadow-rose-500/40', text: 'Signal Interference' },
+    connected:    { color: 'bg-[#00FFAA] shadow-[0_0_10px_rgba(0,255,170,0.5)]', text: 'Bridge Sync: Strong' },
+    connecting:   { color: 'bg-[#FFD166] shadow-[0_0_10px_rgba(255,209,102,0.5)]', text: 'Initializing' },
+    reconnecting: { color: 'bg-[#FF4D4D] shadow-[0_0_10px_rgba(255,77,77,0.5)]', text: 'Signal Interference' },
     disconnected: { color: 'bg-slate-500', text: 'System Offline' }
   };
   const config = configs[status] || configs.disconnected;
 
   return (
-    <div className="glass-card px-5 py-3 rounded-2xl flex items-center gap-3 border border-white/5 shadow-2xl backdrop-blur-3xl">
-      <div className={`w-2 h-2 rounded-full ${config.color} animate-pulse`}></div>
-      <span className="text-[10px] font-black tracking-widest uppercase text-slate-100 leading-none">{config.text}</span>
+    <div className="glass-card px-4 py-2.5 rounded-xl flex items-center gap-3 border border-white/5 shadow-2xl">
+      <div className={`w-2 h-2 rounded-full ${config.color} animate-pulse`} />
+      <span className="hud-tag text-slate-200 leading-none">{config.text}</span>
+    </div>
+  );
+}
+
+function CongestionIndicator({ level }) {
+  const configs = {
+    optimal:  { color: '#00FFAA', label: 'OPTIMAL FLOW' },
+    elevated: { color: '#FFD166', label: 'ELEVATED LOAD' },
+    critical: { color: '#FF4D4D', label: 'CRITICAL CONGESTION' },
+  };
+  const c = configs[level] || configs.optimal;
+
+  return (
+    <div className="glass-card px-4 py-2 rounded-xl flex items-center gap-2.5">
+      <Crosshair className="w-3.5 h-3.5" style={{ color: c.color }} />
+      <span className="hud-tag" style={{ color: c.color }}>{c.label}</span>
+    </div>
+  );
+}
+
+function LegendItem({ dotClass, label }) {
+  return (
+    <div className="flex items-center gap-2">
+      <div className={`legend-dot ${dotClass}`} />
+      <span className="hud-tag text-slate-500">{label}</span>
     </div>
   );
 }

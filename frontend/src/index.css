@@ -5,9 +5,21 @@ html, body, #root {
   width: 100%;
   margin: 0;
   padding: 0;
-  background-color: #0F172A;
+  background-color: #020617;
 }
 
+/* ─── Color Tokens ─── */
+:root {
+  --c-fast:     #00FFAA;
+  --c-medium:   #FFD166;
+  --c-congested: #FF4D4D;
+  --c-node:     #4CC9F0;
+  --c-ai:       #9B5DE5;
+  --c-bg:       #020617;
+  --c-sidebar:  #0b1220;
+}
+
+/* ─── Animations ─── */
 @keyframes fade-in {
   from { opacity: 0; }
   to { opacity: 1; }
@@ -15,6 +27,23 @@ html, body, #root {
 @keyframes fade-in-up {
   from { opacity: 0; transform: translateY(20px); }
   to { opacity: 1; transform: translateY(0); }
+}
+@keyframes pulse-ring {
+  0%   { transform: scale(1);   opacity: 0.8; }
+  70%  { transform: scale(2.4); opacity: 0; }
+  100% { transform: scale(1);   opacity: 0; }
+}
+@keyframes node-breathe {
+  0%, 100% { box-shadow: 0 0 6px 2px var(--c-node); }
+  50%      { box-shadow: 0 0 14px 6px var(--c-node); }
+}
+@keyframes scanline {
+  0%   { transform: translateY(-100%); }
+  100% { transform: translateY(100vh); }
+}
+@keyframes glow-pulse {
+  0%, 100% { opacity: 0.4; }
+  50%      { opacity: 0.7; }
 }
 
 .animate-fade-in {
@@ -26,27 +55,178 @@ html, body, #root {
   opacity: 0;
 }
 
-
+/* ─── Leaflet Base ─── */
 .leaflet-container {
   height: 100% !important;
   width: 100% !important;
-  background: #020617 !important;
+  background: var(--c-bg) !important;
   z-index: 0;
-  /* Ensure no global filters interfere with tile rendering */
   filter: none !important;
   opacity: 1 !important;
 }
 
-/* The "Hidden Killer" Fix */
+/* Remove leaflet attribution visual noise */
+.leaflet-control-attribution {
+  display: none !important;
+}
+
+/* ─── Map Wrapper ─── */
 .map-wrapper {
   flex: 3;
-  min-height: 0; 
+  min-height: 0;
   position: relative;
   height: 100%;
 }
 
-.glass-card {
-  background: rgba(30, 41, 59, 0.5);
-  backdrop-filter: blur(12px);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+/* ─── 🌫️ Cinematic Dark Overlay (Radial Vignette) ─── */
+.map-overlay-vignette {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(
+    ellipse at 50% 50%,
+    rgba(0, 20, 40, 0.05) 0%,
+    rgba(0, 10, 25, 0.25) 60%,
+    rgba(0, 0, 0, 0.55) 100%
+  );
+  pointer-events: none;
+  z-index: 500;
 }
+
+/* ─── ⚡ Subtle Tech Grid Overlay ─── */
+.map-overlay-grid {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(rgba(255,255,255,0.018) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,255,255,0.018) 1px, transparent 1px);
+  background-size: 40px 40px;
+  pointer-events: none;
+  z-index: 501;
+}
+
+/* ─── Scanline Sweep (very subtle) ─── */
+.map-overlay-scanline {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  z-index: 502;
+}
+.map-overlay-scanline::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  width: 100%;
+  height: 3px;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(0,255,170,0.08) 20%,
+    rgba(0,255,170,0.15) 50%,
+    rgba(0,255,170,0.08) 80%,
+    transparent 100%
+  );
+  animation: scanline 6s linear infinite;
+}
+
+/* ─── 🔥 Road Glow Layer ─── */
+.road-glow {
+  filter: drop-shadow(0 0 6px rgba(0,255,170,0.35));
+}
+.road-glow-medium {
+  filter: drop-shadow(0 0 5px rgba(255,209,102,0.4));
+}
+.road-glow-congested {
+  filter: drop-shadow(0 0 6px rgba(255,77,77,0.5));
+}
+
+/* ─── 🚗 Vehicle Glow ─── */
+.vehicle-glow-fast {
+  filter: drop-shadow(0 0 5px rgba(0,255,170,0.8));
+}
+.vehicle-glow-medium {
+  filter: drop-shadow(0 0 4px rgba(255,209,102,0.7));
+}
+.vehicle-glow-stopped {
+  filter: drop-shadow(0 0 5px rgba(255,77,77,0.7));
+}
+
+/* ─── Node Pulse Ring (CSS for CircleMarker "active" halo) ─── */
+.node-pulse-ring {
+  position: absolute;
+  border-radius: 50%;
+  animation: pulse-ring 2s cubic-bezier(0.215, 0.61, 0.355, 1) infinite;
+  pointer-events: none;
+}
+
+/* ─── Glass Card ─── */
+.glass-card {
+  background: rgba(15, 23, 42, 0.65);
+  backdrop-filter: blur(16px) saturate(1.6);
+  -webkit-backdrop-filter: blur(16px) saturate(1.6);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  box-shadow:
+    0 4px 30px rgba(0,0,0,0.3),
+    inset 0 1px 0 rgba(255,255,255,0.05);
+}
+
+/* ─── Edge Depth Fade (map boundary fog) ─── */
+.map-depth-fade {
+  position: absolute;
+  inset: 0;
+  mask-image: radial-gradient(ellipse at center, white 55%, transparent 100%);
+  -webkit-mask-image: radial-gradient(ellipse at center, white 55%, transparent 100%);
+  pointer-events: none;
+  z-index: 499;
+}
+
+/* ─── Tooltip override ─── */
+.leaflet-tooltip {
+  background: rgba(2, 6, 23, 0.92) !important;
+  border: 1px solid rgba(76, 201, 240, 0.3) !important;
+  color: #e2e8f0 !important;
+  font-size: 10px !important;
+  font-weight: 800 !important;
+  letter-spacing: 0.12em !important;
+  text-transform: uppercase !important;
+  border-radius: 6px !important;
+  padding: 3px 8px !important;
+  box-shadow: 0 0 12px rgba(76,201,240,0.15) !important;
+}
+.leaflet-tooltip-top::before {
+  border-top-color: rgba(76, 201, 240, 0.3) !important;
+}
+
+/* ─── HUD Elements ─── */
+.hud-tag {
+  font-size: 9px;
+  font-weight: 900;
+  letter-spacing: 0.25em;
+  text-transform: uppercase;
+  color: rgba(148,163,184,0.7);
+}
+
+/* ─── Sidebar Stat Glow on Hover ─── */
+.stat-card-glow {
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.stat-card-glow:hover {
+  box-shadow:
+    0 0 30px rgba(56, 189, 248, 0.08),
+    inset 0 1px 0 rgba(255,255,255,0.08);
+  border-color: rgba(56,189,248, 0.15);
+}
+
+/* ─── Legend Dot Glow ─── */
+.legend-dot {
+  border-radius: 50%;
+  width: 10px;
+  height: 10px;
+}
+.legend-dot-fast     { background: var(--c-fast);     box-shadow: 0 0 8px var(--c-fast); }
+.legend-dot-medium   { background: var(--c-medium);   box-shadow: 0 0 8px var(--c-medium); }
+.legend-dot-congested{ background: var(--c-congested); box-shadow: 0 0 8px var(--c-congested); }
+.legend-dot-node     { background: var(--c-node);     box-shadow: 0 0 8px var(--c-node); }
+.legend-dot-ai       { background: var(--c-ai);       box-shadow: 0 0 8px var(--c-ai); }
