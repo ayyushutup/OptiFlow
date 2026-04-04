@@ -24,6 +24,10 @@ class MapEngine:
             print(f"[MapEngine] Error fetching map: {e}")
             return False
 
+    def get_graph(self):
+        """Returns the raw MultiDiGraph for pathfinding."""
+        return self.graph
+
     def get_serializable_network(self):
         """Converts the NetworkX graph into a React-friendly JSON format."""
         if not self.graph:
@@ -39,7 +43,8 @@ class MapEngine:
             })
             
         edges_data = []
-        for u, v, data in self.graph.edges(data=True):
+        # MultiDiGraph yields (u, v, data) if keys=False, but we want keys for robustness
+        for u, v, key, data in self.graph.edges(keys=True, data=True):
             # Geometry contains the precise path points
             geometry = []
             if 'geometry' in data:
@@ -55,6 +60,7 @@ class MapEngine:
             edges_data.append({
                 "from": u,
                 "to": v,
+                "key": key,
                 "length": data.get('length', 0),
                 "lanes": data.get('lanes', 1),
                 "maxspeed": data.get('maxspeed', 40),
