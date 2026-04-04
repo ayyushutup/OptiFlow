@@ -43,3 +43,9 @@ VISUALIZE = False
 
 # ---MODEL PERSISTENCE---
 MODEL_DIR = 'models'   # directory to save/load trained agent weights
+MODEL_SAVE_FREQ = 100  # steps between auto-saves
+LOAD_MODEL = True      # load model on startup if exists
+
+# ---TRAINING MODE---
+TRAINING_MODE = False  # If True, runs simulation as fast as CPU allows
+SPEED_MULTIPLIER = 1   # Default speed multiplier for 'tick' loop

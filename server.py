@@ -49,12 +49,20 @@ class RealSimManager:
         self.agents = {}   # node_id -> DQNAgent
         self.signals = {}  # node_id -> state dict
         
+        # Persistence settings
+        self.model_path = os.path.join(config.MODEL_DIR, "dqn_main.pth")
+        self.global_agent = DQNAgent(state_size=4, action_size=2)
+        
+        # Attempt to load existing weights
+        if config.LOAD_MODEL:
+            self.global_agent.load_weights(self.model_path)
+        
         # Initialize agents for OSM signals
         for node in self.nodes:
             if node.get('is_signal'):
                 sid = node['id']
-                # State: [N, S, E, W] queues. Action: 0 (NS Green) or 1 (EW Green)
-                self.agents[sid] = DQNAgent(state_size=4, action_size=2)
+                # Shared global agent for all signals
+                self.agents[sid] = self.global_agent
                 self.signals[sid] = {
                     "green_dirs": ["N", "S"],
                     "last_state": None,
@@ -281,10 +289,26 @@ async def websocket_endpoint(websocket: WebSocket):
     try:
         print("[Server] WebSocket Connection Established.")
         while True:
-            # Broadcast physics
-            frame = sim_manager.tick()
+            # Check for incoming commands if any (async check)
+            # 1. Broadest physics update (using multiplier from config)
+             # Multi-step update if Training Mode is on
+            steps_per_broadcast = config.SPEED_MULTIPLIER if not config.TRAINING_MODE else 10
+            
+            for _ in range(steps_per_broadcast):
+                frame = sim_manager.tick()
+                
+                # Check for persistence save
+                if sim_manager.step_count % config.MODEL_SAVE_FREQ == 0:
+                    sim_manager.global_agent.save_weights(sim_manager.model_path)
+            
+            # 2. Broadcast frame to UI
             await websocket.send_text(json.dumps(frame))
-            await asyncio.sleep(0.05) # ~20 FPS simulation steps
+            
+            # 3. Dynamic sleep based on mode
+            if config.TRAINING_MODE:
+                await asyncio.sleep(0.001) # Near 0 delay for training
+            else:
+                await asyncio.sleep(0.05 / config.SPEED_MULTIPLIER) # Real-time ish
     except WebSocketDisconnect:
         print("[Server] Connection Dropped.")
     except Exception as e:

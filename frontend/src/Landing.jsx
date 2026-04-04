@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Activity, Map as MapIcon, Cpu, Zap, ArrowRight, Server, Box, Globe, ChevronRight } from 'lucide-react';
+import { Activity, Map as MapIcon, Cpu, Zap, ArrowRight, Server, Box, Globe, ChevronRight, Database } from 'lucide-react';
 
 export default function Landing() {
   const [scrolled, setScrolled] = useState(false);

@@ -66,11 +66,32 @@ class RealTrafficEnv:
     def get_reward(self, node_id, vehicles):
         """
         Negative congestion penalty.
-        Uses sum of squares of queue lengths to heavily penalize large bottlenecks.
+        Combines queue length penalty (squared) with accumulated waiting time.
         """
-        # Get raw counts (de-normalized)
-        state = self.get_state(node_id, vehicles) * 10.0
-        reward = -np.sum(np.square(state))
+        if node_id not in self.signal_configs:
+            self.register_signal(node_id)
+            
+        bins = self.signal_configs[node_id]
+        total_waiting_time = 0
+        queue_penalty = 0
+        
+        # Calculate penalty across all incoming arms
+        for direction in ['N', 'S', 'E', 'W']:
+            count = 0
+            dir_wait = 0
+            edges = bins[direction]
+            for v, u in edges:
+                for veh in vehicles:
+                    if veh['from'] == v and veh['to'] == u and (veh['length'] - veh['pos']) < 30:
+                        count += 1
+                        dir_wait += veh.get('waiting_time', 0)
+            
+            queue_penalty += count ** 2
+            total_waiting_time += dir_wait
+
+        # Scale waiting time to be comparable to queue penalty
+        # (1s of waiting ~ 0.5 unit of penalty, adjustable)
+        reward = -(queue_penalty + (total_waiting_time * 0.5))
         return float(reward)
 
     def get_green_dirs(self, node_id, action):
