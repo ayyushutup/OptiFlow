@@ -142,7 +142,21 @@ export default function Dashboard() {
         setSocketError('Map geometry server unreachable (Port 8000)');
       }
     };
+    
+    const fetchHistory = async () => {
+      try {
+        const res = await fetch(`${API_URL}/api/metrics/history`);
+        if (res.ok) {
+          const json = await res.json();
+          setHistory(json);
+        }
+      } catch (e) {
+        console.error('Failed to fetch historical metrics');
+      }
+    };
+
     fetchMap();
+    fetchHistory();
   }, []);
 
   // 🛰️ 2. WebSocket Lifecycle
@@ -177,7 +191,7 @@ export default function Dashboard() {
           if (parsed.metrics) {
              setHistory(prev => {
                  const updated = [...prev, { time: parsed.metrics.step, speed: parsed.metrics.avg_speed, wait: parsed.metrics.total_waiting_time }];
-                 if (updated.length > 50) updated.shift();
+                 if (updated.length > 100) updated.shift();
                  return updated;
              });
           }

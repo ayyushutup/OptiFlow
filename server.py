@@ -10,6 +10,7 @@ import uvicorn
 import networkx as nx
 import math
 import config
+import database
 from agents.map_engine import MapEngine
 from agents.dqn_agent import DQNAgent
 from agents.real_env import RealTrafficEnv
@@ -19,6 +20,8 @@ sys.path.append(os.path.join(os.path.dirname(__file__), 'simulation'))
 sys.path.append(os.path.join(os.path.dirname(__file__), 'agents'))
 
 app = FastAPI(title="OptiFlow Real-World Backend")
+
+database.init_db()
 
 app.add_middleware(
     CORSMiddleware,
@@ -447,6 +450,11 @@ async def get_map():
     """Retrieve the static road network."""
     return real_network
 
+@app.get("/api/metrics/history")
+async def get_metrics_history():
+    """Fetch the latest historical metric points for UI charting."""
+    return database.get_historical_metrics(limit=100)
+
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
@@ -508,6 +516,17 @@ async def websocket_endpoint(websocket: WebSocket):
                         agent.model.load_state_dict(avg_sd)
                         agent.update_target_model()
                         agent.save_weights(os.path.join(config.MODEL_DIR, f"dqn_regional_{name}.pth"))
+            
+            # Log metrics to DB before broadcasting
+            metrics_data = frame.get("metrics")
+            if metrics_data:
+                database.insert_metric(
+                    step=metrics_data["step"],
+                    active_vehicles=metrics_data["active_vehicles"],
+                    stopped_vehicles=metrics_data["stopped_vehicles"],
+                    avg_speed=metrics_data["avg_speed"],
+                    total_waiting_time=metrics_data["total_waiting_time"]
+                )
             
             # 2. Broadcast frame to UI
             await websocket.send_text(json.dumps(frame))

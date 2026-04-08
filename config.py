@@ -37,6 +37,12 @@ BATCH_SIZE = 64
 MEMORY_SIZE = 10000
 TARGET_UPDATE_FREQ = 10
 
+# ---PER SETTINGS---
+PER_ALPHA = 0.6    # Alpha determines how much prioritization is used
+PER_BETA = 0.4     # Beta determines how much importance sampling correction is used
+PER_BETA_INCREMENT = 0.001
+PER_EPSILON = 0.01
+
 # ---RUNTIME SETTINGS (overridden by CLI args in main.py)---
 BACKEND = 'grid'   # 'grid' or 'sumo'
 VISUALIZE = False

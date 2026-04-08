@@ -18,6 +18,37 @@ html, body, #root {
   --c-ai:        #9B5DE5;
   --c-bg:        #02040a;
   --c-sidebar:   rgba(10, 10, 20, 0.85);
+  --c-grid:      rgba(0, 255, 198, 0.05);
+}
+
+.bg-cyber-grid {
+  background-image: 
+    linear-gradient(var(--c-grid) 1px, transparent 1px),
+    linear-gradient(90deg, var(--c-grid) 1px, transparent 1px);
+  background-size: 40px 40px;
+}
+
+.bg-cyber-dots {
+  background-image: radial-gradient(var(--c-grid) 1px, transparent 1px);
+  background-size: 20px 20px;
+}
+
+@keyframes breathing-glow {
+  0%, 100% { opacity: 0.3; transform: scale(1); }
+  50% { opacity: 0.6; transform: scale(1.05); }
+}
+
+.animate-breathing {
+  animation: breathing-glow 4s ease-in-out infinite;
+}
+
+@keyframes scan-line {
+  from { transform: translateY(-100%); }
+  to { transform: translateY(100vh); }
+}
+
+.animate-scan {
+  animation: scan-line 8s linear infinite;
 }
 
 /* ─── Map Base & Tiles ─── */
@@ -157,9 +188,9 @@ body::after {
   background: repeating-linear-gradient(
     to bottom,
     transparent,
-    transparent 2px,
-    rgba(0, 255, 255, 0.035) 3px,
-    rgba(0, 255, 255, 0.01) 4px
+    transparent 4px,
+    rgba(0, 255, 198, 0.02) 4px,
+    rgba(0, 255, 198, 0.02) 5px
   );
   pointer-events: none;
   z-index: 9999;
@@ -201,6 +232,20 @@ body::after {
   color: #fff;
 }
 
-.text-cyber-glow {
-  text-shadow: 0 0 8px currentColor;
+.text-cyber-glow-cyan {
+  text-shadow: 0 0 10px var(--c-fast), 0 0 20px var(--c-fast);
+}
+
+.text-cyber-glow-magenta {
+  text-shadow: 0 0 10px var(--c-medium), 0 0 25px var(--c-medium);
+}
+
+.border-cyber-cyan {
+  border: 1px solid var(--c-fast);
+  box-shadow: 0 0 15px rgba(0, 255, 198, 0.3), inset 0 0 10px rgba(0, 255, 198, 0.1);
+}
+
+.border-cyber-magenta {
+  border: 1px solid var(--c-medium);
+  box-shadow: 0 0 15px rgba(255, 0, 255, 0.3), inset 0 0 10px rgba(255, 0, 255, 0.1);
 }

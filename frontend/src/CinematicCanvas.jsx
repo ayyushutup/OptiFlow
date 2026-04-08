@@ -137,7 +137,15 @@ export default function CinematicScene() {
     );
 
     const trafficGeomRef = useRef();
-    const trafficInitialPositions = useMemo(() => new Float32Array(TRAFFIC_COUNT * 3), []);
+    const trafficInitialPositions = useMemo(() => {
+        const positions = new Float32Array(TRAFFIC_COUNT * 3);
+        trafficData.current.forEach((v, i) => {
+            positions[i * 3] = v.position[0];
+            positions[i * 3 + 1] = v.position[1];
+            positions[i * 3 + 2] = v.position[2];
+        });
+        return positions;
+    }, []);
 
     // INTERSECTION LOGIC UPDATE
     useFrame((state, delta) => {
@@ -182,10 +190,10 @@ export default function CinematicScene() {
         // INTERSECTIONS LOGIC
         // Every frame, occasionally swap states to simulate traffic light cycle and AI actions
         const time = state.clock.elapsedTime;
-        if (intersectionsRef.current) {
+        if (intersectionsRef.current && intersectionsRef.current.geometry) {
             intersectionsRef.current.material.opacity = cityAlpha * 0.9;
             const colors = intersectionsRef.current.geometry.attributes.color;
-            if (colors) {
+            if (colors && colors.array) {
                 for (let i = 0; i < INTERSECTION_COUNT; i++) {
                     // Randomly swap states (super simplified traffic light cycle)
                     if (Math.random() < 0.002) {
@@ -209,12 +217,15 @@ export default function CinematicScene() {
         }
 
         // TRAFFIC LOGIC
-        if (trafficGeomRef.current) {
-            const positions = trafficGeomRef.current.attributes.position.array;
+        if (trafficGeomRef.current?.geometry?.attributes?.position) {
+            const positions = trafficGeomRef.current.geometry.attributes.position.array;
             
             for(let i = 0; i < TRAFFIC_COUNT; i++) {
                 const vehicle = trafficData.current[i];
+                if (!vehicle) continue;
+
                 const vPosIdx = i * 3;
+                if (vPosIdx + 2 >= positions.length) continue;
                 
                 // Very basic 1D distance check along its axis of movement
                 let speedMult = 1.0;
@@ -235,15 +246,17 @@ export default function CinematicScene() {
                     
                     if (gridX >= 0 && gridX < GRID_UNITS && gridZ >= 0 && gridZ < GRID_UNITS) {
                         const stateIdx = gridX * GRID_UNITS + gridZ;
-                        const nState = intersectionStates[stateIdx];
-                        
-                        if (nState === 2) { // RED (Congestion)
-                            // Smoothly decelerate as it approaches
-                            speedMult = Math.max(0, distToNode - 0.5); 
-                        } else if (nState === 1) { // YELLOW 
-                            speedMult = 0.5;
-                        } else { // GREEN
-                            speedMult = 1.5; // Accelerate through
+                        if (stateIdx >= 0 && stateIdx < intersectionStates.length) {
+                             const nState = intersectionStates[stateIdx];
+                             
+                             if (nState === 2) { // RED (Congestion)
+                                 // Smoothly decelerate as it approaches
+                                 speedMult = Math.max(0, distToNode - 0.5); 
+                             } else if (nState === 1) { // YELLOW 
+                                 speedMult = 0.5;
+                             } else { // GREEN
+                                 speedMult = 1.5; // Accelerate through
+                             }
                         }
                     }
                 }
@@ -260,7 +273,7 @@ export default function CinematicScene() {
                 positions[vPosIdx+1] = vehicle.position[1];
                 positions[vPosIdx+2] = vehicle.position[2];
             }
-            trafficGeomRef.current.attributes.position.needsUpdate = true;
+            trafficGeomRef.current.geometry.attributes.position.needsUpdate = true;
         }
     });
 
@@ -331,6 +344,25 @@ export default function CinematicScene() {
                     <bufferAttribute attach="attributes-color" count={INTERSECTION_COUNT} array={intersectionColors} itemSize={3} />
                 </bufferGeometry>
                 <pointsMaterial transparent opacity={0} blending={THREE.AdditiveBlending} size={1.2} vertexColors sizeAttenuation />
+            </points>
+
+            {/* STAGE 3: Buildings */}
+            <instancedMesh ref={buildingsRef} args={[null, null, BUILDING_COUNT]}>
+                <boxGeometry args={[1, 1, 1]} />
+                <meshStandardMaterial color="#00FFC6" transparent opacity={0} metalness={1} roughness={0} wireframe />
+            </instancedMesh>
+
+            {/* STAGE 4: Traffic Points */}
+            <points ref={trafficGeomRef}>
+                <bufferGeometry>
+                    <bufferAttribute 
+                        attach="attributes-position" 
+                        count={TRAFFIC_COUNT} 
+                        array={trafficInitialPositions} 
+                        itemSize={3} 
+                    />
+                </bufferGeometry>
+                <pointsMaterial color="#FF00FF" size={0.5} transparent opacity={0.8} blending={THREE.AdditiveBlending} />
             </points>
 
             {/* Atmospheric Depth */}
