@@ -28,6 +28,31 @@ class MapEngine:
         """Returns the raw MultiDiGraph for pathfinding."""
         return self.graph
 
+    def _parse_lanes(self, lane_data):
+        """Robustly parses OSM lane strings/lists into an integer."""
+        if not lane_data:
+            return 1
+        if isinstance(lane_data, list):
+            # Take the largest value if it's a list (e.g., ['2', '3'])
+            try:
+                return max([int(str(x)) for x in lane_data if str(x).isdigit()] + [1])
+            except:
+                return 1
+        if isinstance(lane_data, str):
+            # Handle '2;3' or '2'
+            try:
+                # Extract first contiguous integer
+                import re
+                nums = re.findall(r'\d+', lane_data)
+                if nums:
+                    return int(nums[0])
+            except:
+                pass
+        try:
+            return int(lane_data)
+        except:
+            return 1
+
     def get_serializable_network(self):
         """Converts the NetworkX graph into a React-friendly JSON format."""
         if not self.graph:
@@ -62,7 +87,7 @@ class MapEngine:
                 "to": v,
                 "key": key,
                 "length": data.get('length', 0),
-                "lanes": data.get('lanes', 1),
+                "lanes": self._parse_lanes(data.get('lanes', 1)),
                 "maxspeed": data.get('maxspeed', 40),
                 "path": geometry
             })

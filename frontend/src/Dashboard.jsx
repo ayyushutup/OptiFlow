@@ -371,7 +371,7 @@ export default function Dashboard() {
               }
             }
             
-            const interpolatePath = (edge, pos, edgeLen = 10) => {
+            const interpolatePath = (edge, pos, edgeLen = 10, laneIdx = 0, numLanes = 1) => {
               if (!edge?.path?.length || edge.path.length < 2) return null;
               const progress = Math.max(0, Math.min(pos / Math.max(edgeLen, 0.1), 1.0));
               const maxIdx = edge.path.length - 1;
@@ -382,10 +382,28 @@ export default function Dashboard() {
               const p1 = edge.path[pathIdx];
               const p2 = edge.path[nextIdx];
               if (!p1 || !p2) return null;
-              return [
-                p1[0] + (p2[0] - p1[0]) * subProgress,
-                p1[1] + (p2[1] - p1[1]) * subProgress
-              ];
+
+              // Base interpolated position
+              const baseLat = p1[0] + (p2[0] - p1[0]) * subProgress;
+              const baseLon = p1[1] + (p2[1] - p1[1]) * subProgress;
+
+              // Perpendicular Lane Offset logic
+              if (numLanes > 1) {
+                // Approximate lane width in lat/lon degrees
+                const LANE_WIDTH = 0.000025; 
+                const dy = p2[0] - p1[0];
+                const dx = p2[1] - p1[1];
+                const heading = Math.atan2(dy, dx);
+                
+                // Offset calculation (centering the lanes)
+                const offsetMultiplier = laneIdx - (numLanes - 1) / 2;
+                const offsetLat = Math.cos(heading + Math.PI / 2) * (offsetMultiplier * LANE_WIDTH);
+                const offsetLon = Math.sin(heading + Math.PI / 2) * (offsetMultiplier * LANE_WIDTH);
+                
+                return [baseLat + offsetLat, baseLon + offsetLon];
+              }
+
+              return [baseLat, baseLon];
             };
 
             const incidentMarkers = data?.incidents?.map((inc, i) => {
@@ -410,7 +428,7 @@ export default function Dashboard() {
             const vehicleMarkers = data?.vehicles?.map((v) => {
               const edgeKey = `${v.from}_${v.to}`;
               const edge = edgeMap[edgeKey];
-              const currentPos = interpolatePath(edge, v.pos, Math.max(v.edge_length || 10, 0.1));
+              const currentPos = interpolatePath(edge, v.pos, Math.max(v.edge_length || 10, 0.1), v.lane_idx, v.num_lanes);
               if (!currentPos) return null;
 
               // Sanity check — reject positions wildly off Mumbai

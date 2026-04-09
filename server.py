@@ -4,6 +4,7 @@ import asyncio
 import json
 import numpy as np
 import torch
+import random
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
@@ -144,6 +145,9 @@ class RealSimManager:
                 max_speed = np.random.uniform(22, 28)
                 accel_mult = 1.5
                 
+            num_lanes = int(edge_data.get('lanes', 1))
+            lane_idx = random.randint(0, num_lanes - 1)
+
             self.vehicles.append({
                 "id": f"v_{self.vehicle_id_counter}",
                 "type": v_type,
@@ -153,6 +157,8 @@ class RealSimManager:
                 "to": v,
                 "pos": 0,
                 "edge_length": edge_data.get('length', 10),
+                "num_lanes": num_lanes,
+                "lane_idx": lane_idx,
                 "v_length": v_len,
                 "speed": max_speed * 0.8,
                 "max_speed": max_speed,
@@ -162,6 +168,60 @@ class RealSimManager:
             self.vehicle_id_counter += 1
         except (nx.NetworkXNoPath, nx.NodeNotFound):
             pass
+
+    def get_dynamic_edge_weights(self):
+        """Calculates current edge weights based on length and congestion."""
+        weights = {}
+        # Count vehicles per edge
+        edge_counts = {}
+        for v in self.vehicles:
+            key = (v['from'], v['to'])
+            edge_counts[key] = edge_counts.get(key, 0) + 1
+            
+        for u, v, k, data in self.graph.edges(keys=True, data=True):
+            length = data.get('length', 10)
+            count = edge_counts.get((u, v), 0)
+            # Penalize edges with accidents or high density
+            penalty = 1.0
+            if (u, v) in self.incidents:
+                penalty += 10.0 # High penalty for accidents
+                
+            density = count / max(length, 1.0)
+            # Formula: base_length * (1 + density * coefficient) * incident_penalty
+            weight = length * (1.0 + density * 50.0) * penalty
+            weights[(u, v, k)] = weight
+        return weights
+
+    def reroute_vehicle(self, v):
+        """Attempts to find a better path for a vehicle based on current congestion."""
+        if v['path_idx'] + 1 >= len(v['path']):
+            return False # Already near destination
+            
+        curr_node = v['to'] # Vehicle is on edge from -> to
+        target_node = v['path'][-1]
+        
+        # Throttled attempt: 20% chance to actually compute Dijkstra to save CPU
+        if random.random() > 0.1:
+            return False
+
+        try:
+            # We need an updated weight function for NetworkX
+            edge_weights = self.get_dynamic_edge_weights()
+            
+            def weight_func(u, n, d):
+                # k is not guaranteed in weight_func, but nx uses data dict
+                # We'll use u, n to retrieve our weight
+                return edge_weights.get((u, n, 0), d.get('length', 10))
+
+            new_path_suffix = nx.shortest_path(self.graph, curr_node, target_node, weight=weight_func)
+            if len(new_path_suffix) > 1:
+                # Merge current path head with new suffix
+                new_full_path = v['path'][:v['path_idx'] + 2] + new_path_suffix[1:]
+                v['path'] = new_full_path
+                return True
+        except:
+            pass
+        return False
 
     def tick(self):
         """Simulation physics step with IDM car-following, signal control, and real metrics."""
@@ -317,20 +377,45 @@ class RealSimManager:
                                 stopped_by_signal = False
                                 desired_speed = min(desired_speed, 2.0) # Crawl speed
             
-            # --- IDM: find leader on same edge ---
+            # --- IDM: find leader in SAME lane ---
             edge_key = (u, dest_node)
             siblings = edge_vehicles.get(edge_key, [])
+            
+            # Simple MOBIL-inspired Lane Change
+            num_lanes = v.get('num_lanes', 1)
+            if num_lanes > 1 and v['speed'] < 5.0 and random.random() < 0.05:
+                # Try adjacent lanes
+                for target_lane in [v['lane_idx'] - 1, v['lane_idx'] + 1]:
+                    if 0 <= target_lane < num_lanes:
+                        # Check safety in target lane (gap ahead and behind)
+                        others_in_target = [s for s in siblings if s.get('lane_idx') == target_lane]
+                        leader_in_target = next((s for s in others_in_target if s['pos'] > v['pos']), None)
+                        follower_in_target = next((s for s in reversed(others_in_target) if s['pos'] < v['pos']), None)
+                        
+                        safe = True
+                        if leader_in_target and (leader_in_target['pos'] - v['pos']) < 8: safe = False
+                        if follower_in_target and (v['pos'] - follower_in_target['pos']) < 8: safe = False
+                        
+                        if safe:
+                            v['lane_idx'] = target_lane
+                            break
+
             leader_gap = float('inf')
             leader_speed = desired_speed
             
-            idx_in_edge = None
-            for i, sv in enumerate(siblings):
+            # Leader is next vehicle in SAME lane
+            leader = None
+            for i in range(len(siblings)):
+                sv = siblings[i]
                 if sv['id'] == v['id']:
-                    idx_in_edge = i
+                    # Look ahead in same lane
+                    for j in range(i + 1, len(siblings)):
+                        if siblings[j].get('lane_idx') == v.get('lane_idx', 0):
+                            leader = siblings[j]
+                            break
                     break
             
-            if idx_in_edge is not None and idx_in_edge + 1 < len(siblings):
-                leader = siblings[idx_in_edge + 1]
+            if leader:
                 leader_gap = leader['pos'] - v['pos'] - leader.get('v_length', 5.0)
                 leader_speed = leader['speed']
                 if leader_gap < 0: leader_gap = 0.1
@@ -368,9 +453,12 @@ class RealSimManager:
             v['speed'] = min(new_speed, v['max_speed'])
             v['pos'] += v['speed'] * dt
             
-            # Track waiting time
+            # Track waiting time and Trigger Rerouting
             if v['speed'] < 0.5:
                 v['waiting_time'] += dt
+                if v['waiting_time'] > 15.0: # If stuck for 15s
+                    if self.reroute_vehicle(v):
+                        v['waiting_time'] = 0.0 # Reset after reroute
             
             # --- Edge transition ---
             if v['pos'] >= v['edge_length']:
@@ -426,6 +514,8 @@ class RealSimManager:
                     "to": int(v['to']),
                     "pos": float(v['pos']),
                     "edge_length": float(v['edge_length']),
+                    "lane_idx": v.get('lane_idx', 0),
+                    "num_lanes": v.get('num_lanes', 1),
                     "speed": round(float(v['speed']), 1)
                 } for v in self.vehicles
             ],
