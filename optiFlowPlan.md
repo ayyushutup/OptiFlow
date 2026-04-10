@@ -86,7 +86,7 @@ Built discrete grid prototypes, tabular Q-learning, and basic PyGame visualizati
 - Upgraded agents to **GraphDuelingDQN** to process city-wide topology.
 - Implemented **Local Subgraph Observations** (node features + adjacency) in the environment.
 
-### Phase 13 — Emissions Analytics [NEW]
+### Phase 13 — Emissions Analytics
 - Developed real-time **CO2 Emission Modeling** based on vehicle type and engine load (idling vs. cruising).
 - Implemented **Schema Migration** to persist environmental metrics in SQLite.
 - Integrated **Live Emission Telemetry** in the React dashboard with real-time charting.
@@ -122,6 +122,9 @@ OptiFlow/
 | Phase | Objective | Description |
 |---|---|---|
 | **Phase 14** | **Scenario Sandbox** | UI tools to manually spawn accidents, construction, or road closures to test AI resilience. |
+| **Phase 15** | **Public Transit Integration** | Add dedicated Bus Lanes and Signal Priority for heavy transit vehicles to optimized city throughput. |
+| **Phase 16** | **V2V/V2X Communication** | Implement "Smart Vehicles" that share velocity and intent directly with signal agents for sub-second coordination. |
+| **Phase 17** | **Policy Selector UI** | Allow users to toggle between **Eco-Mode** (Min CO2) and **Speed-Mode** (Min Time) policy weighting. |
 
 ---
 
