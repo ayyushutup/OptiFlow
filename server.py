@@ -265,24 +265,26 @@ class RealSimManager:
         if self.step_count % 50 == 0:
             for sid, agent in self.agents.items():
                 state = self.env.get_state(sid, self.vehicles)
+                x, adj = state
+                x_tensor = torch.FloatTensor(x).unsqueeze(0).to(agent.device)
+                adj_tensor = torch.FloatTensor(adj).unsqueeze(0).to(agent.device)
                 
                 # Check Overrides (EVP > Manual)
                 if sid in self.evp_overrides:
                     action = self.evp_overrides[sid]
                     with torch.no_grad():
-                        q_tensor = agent.model(torch.FloatTensor(state).unsqueeze(0).to(agent.device))
+                        q_tensor = agent.model(x_tensor, adj_tensor)
                         self.signals[sid]['q_values'] = q_tensor[0].tolist()
                         self.signals[sid]['is_evp'] = True
                 elif sid in self.overrides:
                     action = self.overrides[sid]
-                    # We can optionally fetch Q-values here for visualization without training
                     with torch.no_grad():
-                        q_tensor = agent.model(torch.FloatTensor(state).unsqueeze(0).to(agent.device))
+                        q_tensor = agent.model(x_tensor, adj_tensor)
                         self.signals[sid]['q_values'] = q_tensor[0].tolist()
                 else:
                     action = agent.choose_action(state)
                     with torch.no_grad():
-                        q_tensor = agent.model(torch.FloatTensor(state).unsqueeze(0).to(agent.device))
+                        q_tensor = agent.model(x_tensor, adj_tensor)
                         self.signals[sid]['q_values'] = q_tensor[0].tolist()
                         
                     if self.signals[sid]['last_state'] is not None:

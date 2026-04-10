@@ -97,42 +97,76 @@ class PrioritizedMemory:
         p = self._get_priority(error)
         self.tree.update(idx, p)
 
-class DuelingDQN(nn.Module):
-    def __init__(self, input_dim, output_dim):
-        super(DuelingDQN, self).__init__()
-        # Shared feature extractor
-        self.feature = nn.Sequential(
-            nn.Linear(input_dim, 64),
-            nn.ReLU(),
-            nn.Linear(64, 64),
-            nn.ReLU()
-        )
+class GCNLayer(nn.Module):
+    """
+    A simple Graph Convolutional Layer in pure PyTorch.
+    Computes: H' = ReLU(D^-1/2 * A_hat * D^-1/2 * H * W)
+    Wait, for simplicity in traffic, we use basic mean-aggregation: H' = ReLU(A_hat * H * W)
+    """
+    def __init__(self, in_features, out_features):
+        super(GCNLayer, self).__init__()
+        self.linear = nn.Linear(in_features, out_features)
+
+    def forward(self, x, adj):
+        """
+        x: Node features [Batch, N, InFeatures]
+        adj: Adjacency matrix [Batch, N, N]
+        """
+        # x is [B, N, F], adj is [B, N, N]
+        # Batch matrix multiplication: [B, N, N] @ [B, N, F] -> [B, N, F]
+        support = self.linear(x)
+        output = torch.matmul(adj, support)
+        return torch.relu(output)
+
+class GraphDuelingDQN(nn.Module):
+    """
+    Dueling DQN with a GCN front-end to process graph-structured intersection states.
+    """
+    def __init__(self, node_features, output_dim, hidden_dim=64):
+        super(GraphDuelingDQN, self).__init__()
         
+        # 1. Graph Spatial Processing
+        self.gcn1 = GCNLayer(node_features, hidden_dim)
+        self.gcn2 = GCNLayer(hidden_dim, hidden_dim)
+        
+        # 2. Dueling Heads
         # Value stream (V(s))
         self.value_stream = nn.Sequential(
-            nn.Linear(64, 32),
+            nn.Linear(hidden_dim, 32),
             nn.ReLU(),
             nn.Linear(32, 1)
         )
         
         # Advantage stream (A(s, a))
         self.advantage_stream = nn.Sequential(
-            nn.Linear(64, 32),
+            nn.Linear(hidden_dim, 32),
             nn.ReLU(),
             nn.Linear(32, output_dim)
         )
         
-    def forward(self, x):
-        features = self.feature(x)
+    def forward(self, x, adj):
+        """
+        x: [Batch, N, F] - N is number of nodes in local subgraph (e.g., node + neighbors)
+        adj: [Batch, N, N]
+        """
+        # Graph convolution
+        h = self.gcn1(x, adj)
+        h = self.gcn2(h, adj)
+        
+        # Extract the representation of the target node (index 0)
+        # Assuming the first node in the subgraph is the one we are controlling
+        features = h[:, 0, :]
+        
         value = self.value_stream(features)
         advantages = self.advantage_stream(features)
-        # Combined Q-value with centering to improve identifiability
+        
+        # Combined Q-value
         q_values = value + (advantages - advantages.mean(dim=1, keepdim=True))
         return q_values
 
 class DQNAgent:
     def __init__(self, state_size, action_size):
-        self.state_size = state_size
+        self.state_size = state_size # This now refers to node_features
         self.action_size = action_size
         self.memory = PrioritizedMemory(capacity=getattr(config, 'MEMORY_SIZE', 10000))
         
@@ -144,9 +178,9 @@ class DQNAgent:
         
         self.device = torch.device("cpu")
         
-        # Upgrade to DuelingDQN
-        self.model = DuelingDQN(state_size, action_size).to(self.device)
-        self.target_model = DuelingDQN(state_size, action_size).to(self.device)
+        # Upgrade to GraphDuelingDQN
+        self.model = GraphDuelingDQN(state_size, action_size).to(self.device)
+        self.target_model = GraphDuelingDQN(state_size, action_size).to(self.device)
         self.update_target_model()
         
         self.optimizer = optim.Adam(self.model.parameters(), lr=self.learning_rate)
@@ -183,17 +217,21 @@ class DQNAgent:
         self.target_model.load_state_dict(self.model.state_dict())
 
     def remember(self, state, action, reward, next_state, done):
-        # Assign maximum priority to new experience so it's definitely sampled once
+        # state is expected to be a tuple (x, adj)
         sample = (state, action, reward, next_state, done)
-        self.memory.add(10.0, sample)  # 10.0 is an arbitrary high initial error
+        self.memory.add(10.0, sample)
 
     def choose_action(self, state, evaluate=False):
+        # state: (x, adj) where x is [N, F], adj is [N, N]
         if not evaluate and np.random.rand() <= self.epsilon:
             return random.randrange(self.action_size)
         
-        state_tensor = torch.FloatTensor(state).unsqueeze(0).to(self.device)
+        x, adj = state
+        x_tensor = torch.FloatTensor(x).unsqueeze(0).to(self.device)
+        adj_tensor = torch.FloatTensor(adj).unsqueeze(0).to(self.device)
+        
         with torch.no_grad():
-            q_values = self.model(state_tensor)
+            q_values = self.model(x_tensor, adj_tensor)
         return torch.argmax(q_values[0]).item()
 
     def replay(self, batch_size):
@@ -202,23 +240,27 @@ class DQNAgent:
             
         minibatch, idxs, is_weights = self.memory.sample(batch_size)
         
-        states = torch.FloatTensor(np.array([m[0] for m in minibatch])).to(self.device)
+        # Unpack experiences that now include (x, adj) in states
+        # minibatch: [(state, action, reward, next_state, done), ...]
+        # state: (x, adj)
+        
+        xs = torch.FloatTensor(np.array([m[0][0] for m in minibatch])).to(self.device)
+        adjs = torch.FloatTensor(np.array([m[0][1] for m in minibatch])).to(self.device)
         actions = torch.LongTensor(np.array([m[1] for m in minibatch])).unsqueeze(1).to(self.device)
         rewards = torch.FloatTensor(np.array([m[2] for m in minibatch])).unsqueeze(1).to(self.device)
-        next_states = torch.FloatTensor(np.array([m[3] for m in minibatch])).to(self.device)
+        next_xs = torch.FloatTensor(np.array([m[3][0] for m in minibatch])).to(self.device)
+        next_adjs = torch.FloatTensor(np.array([m[3][1] for m in minibatch])).to(self.device)
         dones = torch.FloatTensor(np.array([m[4] for m in minibatch])).unsqueeze(1).to(self.device)
         is_weights = torch.FloatTensor(is_weights).unsqueeze(1).to(self.device)
         
-        # --- Double DQN Logic ---
-        # 1. Use primary model to pick the best action for next_state
-        # 2. Use target model to evaluate that action's Q-value
-        current_q = self.model(states).gather(1, actions)
+        # --- Double DQN Logic with Graph Input ---
+        current_q = self.model(xs, adjs).gather(1, actions)
         
         with torch.no_grad():
             # Pick action using primary model
-            next_actions = self.model(next_states).argmax(1).unsqueeze(1)
+            next_actions = self.model(next_xs, next_adjs).argmax(1).unsqueeze(1)
             # Evaluate action using target model
-            next_q = self.target_model(next_states).gather(1, next_actions)
+            next_q = self.target_model(next_xs, next_adjs).gather(1, next_actions)
             target_q = rewards + (self.gamma * next_q * (1 - dones))
             
         # Compute TD Error for priority updates

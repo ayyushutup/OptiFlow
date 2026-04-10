@@ -75,11 +75,16 @@ Built discrete grid prototypes, tabular Q-learning, and basic PyGame visualizati
 - Implemented **Dynamic Edge Weights** calculated from real-time density.
 - Vehicles now perform **Dynamic Rerouting** using Dijkstra to avoid bottlenecks/accidents.
 
-### Phase 11 — Advanced Environmental Dynamics [NEW]
+### Phase 11 — Advanced Environmental Dynamics
 - **Multi-Vehicle Physics**: Integrated Car, Truck, Bus, and Emergency vehicle profiles with unique accel/length properties.
 - **Weather Engine**: Dynamic transitions between Clear, Rain, and Storm, affecting IDM parameters (braking distance/max speed).
 - **Pedestrian Logic**: Random "Pedestrian Crossing" events that trigger emergency stops at intersections.
 - **Emergency Preemption (EVP)**: Automatic signal clearing for ambulances/fire trucks via path-projection overrides.
+
+### Phase 12 — Graph Spatial RL [NEW]
+- Integrated **Graph Convolutional Networks (GCN)** in pure PyTorch.
+- Upgraded agents to **GraphDuelingDQN** to process city-wide topology.
+- Implemented **Local Subgraph Observations** (node features + adjacency) in the environment.
 
 ---
 
@@ -92,8 +97,8 @@ OptiFlow/
 ├── config.py             # Global constants & hyperparameters
 ├── agents/               # AI & Environment Logic
 │   ├── map_engine.py     # OSM fetching & geometry serialization
-│   ├── dqn_agent.py      # Dueling DQN + PER + Double DQN
-│   ├── real_env.py       # RL Wrapper for real-world graph states
+│   ├── dqn_agent.py      # Graph Spatial RL (GCN + Dueling DQN)
+│   ├── real_env.py       # Graph-structured observations (X, A matrices)
 │   └── coordination.py   # Multi-agent utility functions
 ├── simulation/           # Legacy/Core Ops
 │   └── vehicle.py        # Base Vehicle class (Logic migrated to server.py)
@@ -111,7 +116,6 @@ OptiFlow/
 
 | Phase | Objective | Description |
 |---|---|---|
-| **Phase 12** | **Graph Spatial RL** | Integrate Graph Convolutional Networks (GCN) to let agents see "upstream" traffic trends. |
 | **Phase 13** | **Emissions Analytics** | Calculate real-time CO2 and NOx output based on vehicle idling and "stop-and-go" cycles. |
 | **Phase 14** | **Scenario Sandbox** | UI tools to manually spawn accidents, construction, or road closures to test AI resilience. |
 
