@@ -560,6 +560,13 @@ export default function Dashboard() {
             unit="seconds"
             accentColor="#FF4D4D"
           />
+          <StatCard 
+            icon={<Activity className="text-[#00FFC6]" />} 
+            label="CO2 Emission" 
+            value={metrics.co2_emissions !== undefined ? `${metrics.co2_emissions.toFixed(2)}` : "--"} 
+            unit="kg"
+            accentColor="#00FFC6"
+          />
         </div>
 
         {/* Node Override & Analytics */}
@@ -633,17 +640,17 @@ export default function Dashboard() {
                  <div className="glass-card p-4 rounded-xl border border-white/5 h-48 flex flex-col">
                    <p className="text-[10px] text-slate-400 mb-2 uppercase tracking-widest w-full flex justify-between">
                      <span>Global Telemetry</span>
-                     <span className="text-[#4CC9F0]">Spd</span> | <span className="text-[#FF4D4D]">Wait</span>
+                     <span className="text-[#00FFAA]">CO2</span> | <span className="text-[#FF4D4D]">Wait</span>
                    </p>
                    <div className="flex-1 min-h-0">
                      <ResponsiveContainer width="100%" height="100%">
                        <LineChart data={history}>
                          <CartesianGrid strokeDasharray="3 3" stroke="#ffffff10" vertical={false} />
                          <XAxis dataKey="time" hide />
-                         <YAxis yAxisId="left" stroke="#4CC9F0" tick={{fontSize: 9}} width={30} axisLine={false} tickLine={false} />
+                         <YAxis yAxisId="left" stroke="#00FFAA" tick={{fontSize: 9}} width={30} axisLine={false} tickLine={false} />
                          <YAxis yAxisId="right" orientation="right" stroke="#FF4D4D" tick={{fontSize: 9}} width={30} axisLine={false} tickLine={false} />
                          <RechartsTooltip contentStyle={{backgroundColor: '#050A15', borderColor: '#ffffff20', color: '#fff'}} itemStyle={{fontSize: '12px'}} labelStyle={{display: 'none'}} />
-                         <Line yAxisId="left" type="monotone" dataKey="speed" stroke="#4CC9F0" strokeWidth={2} dot={false} isAnimationActive={false} />
+                         <Line yAxisId="left" type="monotone" dataKey="co2" stroke="#00FFAA" strokeWidth={2} dot={false} isAnimationActive={false} />
                          <Line yAxisId="right" type="monotone" dataKey="wait" stroke="#FF4D4D" strokeWidth={2} dot={false} isAnimationActive={false} />
                        </LineChart>
                      </ResponsiveContainer>

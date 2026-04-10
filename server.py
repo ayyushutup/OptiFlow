@@ -495,6 +495,29 @@ class RealSimManager:
         avg_speed = (sum(v['speed'] for v in self.vehicles) / max(len(self.vehicles), 1))
         stopped = sum(1 for v in self.vehicles if v['speed'] < 0.5)
         
+        # --- Emissions Calculation ---
+        total_co2 = 0.0
+        for v in self.vehicles:
+            # Base emission rate depending on vehicle type (grams per second)
+            if v['type'] == 'truck':
+                base_emission = 8.0
+            elif v['type'] == 'bus':
+                base_emission = 6.0
+            elif v['type'] == 'emergency':
+                base_emission = 5.0
+            else: # car
+                base_emission = 2.5
+                
+            # If idling, emission is constant (flat rate)
+            if v['speed'] < 0.5:
+                total_co2 += base_emission * 0.5 
+            else:
+                # Accelerating/Cruising roughly scales with speed
+                total_co2 += base_emission * (1.0 + (v['speed'] / max(v['max_speed'], 1.0)))
+                
+        # Total CO2 is in kilograms for the dashboard metric
+        total_co2_kg = total_co2 / 1000.0
+
         return {
             "intersections": [
                 {
@@ -531,7 +554,8 @@ class RealSimManager:
                 "active_vehicles": len(self.vehicles),
                 "stopped_vehicles": stopped,
                 "avg_speed": round(float(avg_speed), 1),
-                "total_waiting_time": round(float(total_wait), 1)
+                "total_waiting_time": round(float(total_wait), 1),
+                "co2_emissions": round(float(total_co2_kg), 3)
             }
         }
 
@@ -617,7 +641,8 @@ async def websocket_endpoint(websocket: WebSocket):
                     active_vehicles=metrics_data["active_vehicles"],
                     stopped_vehicles=metrics_data["stopped_vehicles"],
                     avg_speed=metrics_data["avg_speed"],
-                    total_waiting_time=metrics_data["total_waiting_time"]
+                    total_waiting_time=metrics_data["total_waiting_time"],
+                    co2_emissions=metrics_data.get("co2_emissions", 0.0)
                 )
             
             # 2. Broadcast frame to UI

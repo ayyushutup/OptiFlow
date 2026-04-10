@@ -81,10 +81,15 @@ Built discrete grid prototypes, tabular Q-learning, and basic PyGame visualizati
 - **Pedestrian Logic**: Random "Pedestrian Crossing" events that trigger emergency stops at intersections.
 - **Emergency Preemption (EVP)**: Automatic signal clearing for ambulances/fire trucks via path-projection overrides.
 
-### Phase 12 — Graph Spatial RL [NEW]
+### Phase 12 — Graph Spatial RL
 - Integrated **Graph Convolutional Networks (GCN)** in pure PyTorch.
 - Upgraded agents to **GraphDuelingDQN** to process city-wide topology.
 - Implemented **Local Subgraph Observations** (node features + adjacency) in the environment.
+
+### Phase 13 — Emissions Analytics [NEW]
+- Developed real-time **CO2 Emission Modeling** based on vehicle type and engine load (idling vs. cruising).
+- Implemented **Schema Migration** to persist environmental metrics in SQLite.
+- Integrated **Live Emission Telemetry** in the React dashboard with real-time charting.
 
 ---
 
@@ -116,7 +121,6 @@ OptiFlow/
 
 | Phase | Objective | Description |
 |---|---|---|
-| **Phase 13** | **Emissions Analytics** | Calculate real-time CO2 and NOx output based on vehicle idling and "stop-and-go" cycles. |
 | **Phase 14** | **Scenario Sandbox** | UI tools to manually spawn accidents, construction, or road closures to test AI resilience. |
 
 ---
