@@ -107,7 +107,7 @@ class RealTrafficEnv:
             
         return (X, A)
 
-    def get_reward(self, node_id, vehicles):
+    def get_reward(self, node_id, vehicles, policy='speed'):
         """Negative congestion penalty including emergency preemption impact."""
         if node_id not in self.signal_configs:
             self.register_signal(node_id)
@@ -133,7 +133,13 @@ class RealTrafficEnv:
             queue_penalty += count ** 2
             total_waiting_time += dir_wait
 
-        reward = -(queue_penalty + (total_waiting_time * 0.5))
+        if policy == 'eco':
+            # Penalize idling/waiting heavily to minimize emissions
+            reward = -((queue_penalty * 0.5) + (total_waiting_time * 2.0))
+        else:
+            # Default speed mode: focus on throughput (queue length)
+            reward = -(queue_penalty + (total_waiting_time * 0.5))
+
         if emergency_waiting:
             reward *= 100.0  
             
