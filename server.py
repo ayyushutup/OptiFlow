@@ -61,6 +61,7 @@ class RealSimManager:
         self.weather = 'clear'
         self.incidents = {} # (u, v) -> position
         self.pedestrian_events = {} # node_id -> remaining_ticks
+        self.policy = 'speed' # 'speed' or 'eco'
         
         # Regional Federated Learning Setup
         lats = [n['lat'] for n in self.nodes]
@@ -288,7 +289,7 @@ class RealSimManager:
                         self.signals[sid]['q_values'] = q_tensor[0].tolist()
                         
                     if self.signals[sid]['last_state'] is not None:
-                        reward = self.env.get_reward(sid, self.vehicles)
+                        reward = self.env.get_reward(sid, self.vehicles, policy=self.policy)
                         agent.remember(self.signals[sid]['last_state'], 
                                        self.signals[sid]['last_action'], 
                                        reward, state, False)
@@ -546,6 +547,7 @@ class RealSimManager:
             ],
             "edge_congestion": edge_congestion,
             "weather": self.weather,
+            "policy": getattr(self, 'policy', 'speed'),
             "incidents": [{"from": u, "to": v, "pos": p} for (u, v), p in self.incidents.items()],
             "pedestrians": [int(n) for n in self.pedestrian_events.keys()],
             "evp_routes": getattr(self, 'evp_routes', []),
@@ -605,6 +607,8 @@ async def websocket_endpoint(websocket: WebSocket):
                             sim_manager.incidents[(u, v)] = path_len / 2
                         except (IndexError, KeyError):
                             pass
+                elif msg.get("type") == "SET_POLICY":
+                    sim_manager.policy = msg.get("policy", "speed")
         except Exception as e:
             pass
             
