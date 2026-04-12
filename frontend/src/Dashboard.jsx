@@ -615,6 +615,30 @@ export default function Dashboard() {
                  </div>
                )}
 
+               {/* Policy Controls */}
+               <div className="glass-card p-4 rounded-xl border border-white/5 mb-4">
+                 <h3 className="text-[#00FFC6] font-bold uppercase tracking-widest text-xs mb-3 flex items-center gap-2">
+                   <Cpu className="w-4 h-4" /> Optimization Policy
+                 </h3>
+                 <div className="flex gap-2">
+                    <button 
+                      className={`flex-1 font-bold text-[10px] py-1.5 rounded transition-colors ${data?.policy === 'speed' ? 'bg-[#FF00FF] text-white drop-shadow-[0_0_10px_rgba(255,0,255,0.8)]' : 'bg-white/10 text-white hover:bg-white/20'}`} 
+                      onClick={() => wsRef.current?.send(JSON.stringify({type: 'SET_POLICY', policy: 'speed'}))}
+                    >
+                      SPEED MODE
+                    </button>
+                    <button 
+                      className={`flex-1 font-bold text-[10px] py-1.5 rounded transition-colors ${data?.policy === 'eco' ? 'bg-[#00FFAA] text-black drop-shadow-[0_0_10px_rgba(0,255,170,0.8)]' : 'bg-white/10 text-white hover:bg-white/20'}`} 
+                      onClick={() => wsRef.current?.send(JSON.stringify({type: 'SET_POLICY', policy: 'eco'}))}
+                    >
+                      ECO MODE
+                    </button>
+                 </div>
+                 <p className="text-[9px] text-slate-500 mt-2 uppercase tracking-widest leading-tight">
+                   {data?.policy === 'speed' ? 'Minimizing queue length and travel time.' : 'Minimizing idling and CO2 emissions.'}
+                 </p>
+               </div>
+
                {/* Environment Controls */}
                <div className="glass-card p-4 rounded-xl border border-white/5">
                  <h3 className="text-[#4CC9F0] font-bold uppercase tracking-widest text-xs mb-3 flex items-center gap-2">
