@@ -182,10 +182,16 @@ class RealSimManager:
         for u, v, k, data in self.graph.edges(keys=True, data=True):
             length = data.get('length', 10)
             count = edge_counts.get((u, v), 0)
-            # Penalize edges with accidents or high density
+            # Penalize edges with incidents or high density
             penalty = 1.0
             if (u, v) in self.incidents:
-                penalty += 10.0 # High penalty for accidents
+                inc_type = self.incidents[(u, v)]["type"]
+                if inc_type == "accident":
+                    penalty += 10.0
+                elif inc_type == "construction":
+                    penalty += 5.0
+                elif inc_type == "closure":
+                    penalty += 1000.0
                 
             density = count / max(length, 1.0)
             # Formula: base_length * (1 + density * coefficient) * incident_penalty
@@ -423,14 +429,25 @@ class RealSimManager:
                 leader_speed = leader['speed']
                 if leader_gap < 0: leader_gap = 0.1
                 
-            # Virtual leader for incidents
+            # Virtual leader / modifiers for incidents
             if edge_key in self.incidents:
-                accident_pos = self.incidents[edge_key]
-                if v['pos'] < accident_pos:
-                    accident_gap = accident_pos - v['pos'] - 3.0
-                    if accident_gap < leader_gap:
-                        leader_gap = max(accident_gap, 0.1)
-                        leader_speed = 0.0
+                inc = self.incidents[edge_key]
+                inc_pos = inc["pos"]
+                inc_type = inc["type"]
+                
+                if inc_type == "construction":
+                    desired_speed = min(desired_speed, v['max_speed'] * 0.5)
+                elif v['pos'] < inc_pos:
+                    if inc_type == "accident":
+                        gap = inc_pos - v['pos'] - 3.0
+                        if gap < leader_gap:
+                            leader_gap = max(gap, 0.1)
+                            leader_speed = 0.0
+                    elif inc_type == "closure":
+                        gap = inc_pos - v['pos'] - 2.0
+                        if gap < leader_gap:
+                            leader_gap = max(gap, 0.0) # Absolute barrier
+                            leader_speed = 0.0
             
             # Virtual leader for red light
             if stopped_by_signal:
@@ -548,7 +565,7 @@ class RealSimManager:
             "edge_congestion": edge_congestion,
             "weather": self.weather,
             "policy": getattr(self, 'policy', 'speed'),
-            "incidents": [{"from": u, "to": v, "pos": p} for (u, v), p in self.incidents.items()],
+            "incidents": [{"from": u, "to": v, "pos": inc["pos"], "type": inc["type"]} for (u, v), inc in self.incidents.items()],
             "pedestrians": [int(n) for n in self.pedestrian_events.keys()],
             "evp_routes": getattr(self, 'evp_routes', []),
             "metrics": {
@@ -592,19 +609,20 @@ async def websocket_endpoint(websocket: WebSocket):
                 elif msg.get("type") == "WEATHER":
                     sim_manager.weather = msg.get("condition", "clear")
                 elif msg.get("type") == "ADD_INCIDENT":
-                    # Add accident halfway down the edge
                     u, v = msg.get("from"), msg.get("to")
+                    inc_type = msg.get("incident_type", "accident")
                     path_len = map_engine.get_graph()[u][v][0].get('length', 50)
-                    sim_manager.incidents[(u, v)] = path_len / 2
+                    sim_manager.incidents[(u, v)] = {"pos": path_len / 2, "type": inc_type}
                 elif msg.get("type") == "CLEAR_INCIDENTS":
                     sim_manager.incidents.clear()
                 elif msg.get("type") == "TOGGLE_RANDOM_INCIDENTS":
                     edges = list(map_engine.get_graph().edges())
+                    inc_types = ["accident", "construction", "closure"]
                     for _ in range(5):
                         try:
                             u, v = random.choice(edges)
                             path_len = map_engine.get_graph()[u][v][0].get('length', 50)
-                            sim_manager.incidents[(u, v)] = path_len / 2
+                            sim_manager.incidents[(u, v)] = {"pos": path_len / 2, "type": random.choice(inc_types)}
                         except (IndexError, KeyError):
                             pass
                 elif msg.get("type") == "SET_POLICY":

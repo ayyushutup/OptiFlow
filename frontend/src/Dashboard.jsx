@@ -128,6 +128,7 @@ export default function Dashboard() {
   const [socketError, setSocketError] = useState('');
   const [history, setHistory] = useState([]);
   const [selectedNodeId, setSelectedNodeId] = useState(null);
+  const [activeHazTool, setActiveHazTool] = useState('accident');
   const wsRef = useRef(null);
 
   // 🌍 1. Fetch Static Map Data on Mount
@@ -252,7 +253,7 @@ export default function Dashboard() {
                 <Polyline 
                   positions={edge.path}
                   eventHandlers={{
-                    click: () => wsRef.current?.send(JSON.stringify({type: 'ADD_INCIDENT', from: edge.from, to: edge.to}))
+                    click: () => wsRef.current?.send(JSON.stringify({type: 'ADD_INCIDENT', incident_type: activeHazTool, from: edge.from, to: edge.to}))
                   }}
                   pathOptions={{ 
                     color: getEdgeCongestionColor(count), 
@@ -413,16 +414,41 @@ export default function Dashboard() {
                // Estimate edge length. We don't have exact length here, fallback to 50
                const pos = interpolatePath(edge, inc.pos, 50);
                if (!pos) return null;
-               return (
-                 <CircleMarker 
-                   key={`inc-${i}`}
-                   center={pos}
-                   radius={14}
-                   pathOptions={{
-                     fillColor: '#FF0000', fillOpacity: 0.8, color: '#FFFFFF', weight: 2, className: 'animate-ping'
-                   }}
-                 />
-               );
+               
+               if (inc.type === 'construction') {
+                 return (
+                   <CircleMarker 
+                     key={`inc-${i}`}
+                     center={pos}
+                     radius={12}
+                     pathOptions={{
+                       fillColor: '#FFD166', fillOpacity: 0.9, color: '#000000', weight: 3, dashArray: '4, 4', className: 'animate-spin'
+                     }}
+                   />
+                 );
+               } else if (inc.type === 'closure') {
+                 return (
+                   <CircleMarker 
+                     key={`inc-${i}`}
+                     center={pos}
+                     radius={14}
+                     pathOptions={{
+                       fillColor: '#FF00FF', fillOpacity: 0.9, color: '#FFFFFF', weight: 4, className: 'animate-pulse'
+                     }}
+                   />
+                 );
+               } else {
+                 return (
+                   <CircleMarker 
+                     key={`inc-${i}`}
+                     center={pos}
+                     radius={14}
+                     pathOptions={{
+                       fillColor: '#FF0000', fillOpacity: 0.8, color: '#FFFFFF', weight: 2, className: 'animate-ping'
+                     }}
+                   />
+                 );
+               }
             });
 
             const vehicleMarkers = data?.vehicles?.map((v) => {
@@ -650,13 +676,27 @@ export default function Dashboard() {
                     <button className={`flex-1 font-bold text-[10px] py-1.5 rounded transition-colors ${data?.weather === 'storm' ? 'bg-[#4CC9F0] text-black drop-shadow-[0_0_10px_rgba(76,201,240,0.8)]' : 'bg-white/10 text-white'}`} onClick={() => wsRef.current?.send(JSON.stringify({type: 'WEATHER', condition: 'storm'}))}>STORM</button>
                  </div>
                  <h3 className="text-[#FF3B3B] font-bold uppercase tracking-widest text-xs mt-4 mb-3 flex items-center gap-2">
-                   <AlertCircle className="w-4 h-4" /> Hazard Injection
+                   <AlertCircle className="w-4 h-4" /> Scenario Sandbox
                  </h3>
-                 <div className="flex gap-2">
-                     <button className="w-1/2 bg-[#FF3B3B]/20 hover:bg-[#FF3B3B]/40 text-[#FF3B3B] font-bold text-[10px] py-1.5 rounded transition-colors" onClick={() => wsRef.current?.send(JSON.stringify({type: 'TOGGLE_RANDOM_INCIDENTS'}))}>SPAWN RANDOM</button>
+                 <div className="flex gap-2 mb-2">
+                     <button 
+                       className={`flex-1 font-bold text-[10px] py-1.5 rounded transition-colors ${activeHazTool === 'accident' ? 'bg-[#FF3B3B] text-black drop-shadow-[0_0_10px_rgba(255,59,59,0.8)]' : 'bg-white/10 text-white hover:bg-[#FF3B3B]/40 hover:text-[#FF3B3B]'}`} 
+                       onClick={() => setActiveHazTool('accident')}
+                     >ACCIDENT</button>
+                     <button 
+                       className={`flex-1 font-bold text-[10px] py-1.5 rounded transition-colors ${activeHazTool === 'construction' ? 'bg-[#FFD166] text-black drop-shadow-[0_0_10px_rgba(255,209,102,0.8)]' : 'bg-white/10 text-white hover:bg-[#FFD166]/40 hover:text-[#FFD166]'}`} 
+                       onClick={() => setActiveHazTool('construction')}
+                     >CONSTRUCT</button>
+                     <button 
+                       className={`flex-1 font-bold text-[10px] py-1.5 rounded transition-colors ${activeHazTool === 'closure' ? 'bg-[#FF00FF] text-white drop-shadow-[0_0_10px_rgba(255,0,255,0.8)]' : 'bg-white/10 text-white hover:bg-[#FF00FF]/40 hover:text-[#FF00FF]'}`} 
+                       onClick={() => setActiveHazTool('closure')}
+                     >CLOSURE</button>
+                 </div>
+                 <div className="flex gap-2 mt-2">
+                     <button className="w-1/2 bg-white/10 hover:bg-[#FF3B3B]/40 text-[#FF3B3B] font-bold text-[10px] py-1.5 rounded transition-colors" onClick={() => wsRef.current?.send(JSON.stringify({type: 'TOGGLE_RANDOM_INCIDENTS'}))}>SPAWN RANDOM (MIX)</button>
                      <button className="w-1/2 bg-white/10 hover:bg-[#FF3B3B]/40 text-[#FF3B3B] font-bold text-[10px] py-1.5 rounded transition-colors" onClick={() => wsRef.current?.send(JSON.stringify({type: 'CLEAR_INCIDENTS'}))}>CLEAR ALL</button>
                  </div>
-                 <p className="text-[9px] text-slate-500 mt-2 uppercase tracking-widest leading-tight">Click on any road path on the map to manually inject an incident.</p>
+                 <p className="text-[9px] text-slate-500 mt-2 uppercase tracking-widest leading-tight">Select a tool and click on any road path on the map to inject the hazard.</p>
                </div>
 
                {/* Live Chart */}
