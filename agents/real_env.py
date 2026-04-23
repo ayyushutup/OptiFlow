@@ -145,6 +145,37 @@ class RealTrafficEnv:
             
         return float(reward)
 
+    def get_signal_analytics(self, node_id, vehicles):
+        """Returns detailed analytics for a specific intersection."""
+        if node_id not in self.signal_configs:
+            self.register_signal(node_id)
+            
+        bins = self.signal_configs[node_id]['bins']
+        queue_ns = 0
+        queue_ew = 0
+        wait_time = 0.0
+        
+        for direction, queue_counter in [('N', 'ns'), ('S', 'ns'), ('E', 'ew'), ('W', 'ew')]:
+            edges = bins[direction]
+            for v, u in edges:
+                for veh in vehicles:
+                    edge_len = veh.get('edge_length', 10)
+                    # Check if vehicle is approaching this intersection
+                    if veh['from'] == v and veh['to'] == u and (edge_len - veh['pos']) < 50:
+                        speed = veh.get('speed', 0)
+                        if speed < 0.5:
+                            if queue_counter == 'ns':
+                                queue_ns += 1
+                            else:
+                                queue_ew += 1
+                            wait_time += veh.get('waiting_time', 0)
+        
+        return {
+            'queue_ns': queue_ns,
+            'queue_ew': queue_ew,
+            'wait_time': float(wait_time)
+        }
+
     def get_green_dirs(self, node_id, action):
         """Maps action to compass directions. 0: N-S, 1: E-W"""
         return ['N', 'S'] if action == 0 else ['E', 'W']

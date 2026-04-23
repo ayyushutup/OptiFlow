@@ -595,6 +595,41 @@ export default function Dashboard() {
           />
         </div>
 
+        {/* Bottleneck Leaderboard */}
+        <div className="mb-6 glass-card p-4 rounded-xl border border-[#FF3B3B]/40 drop-shadow-[0_0_15px_rgba(255,59,59,0.15)] relative overflow-hidden">
+          <div className="absolute top-0 left-0 w-1 h-full bg-[#FF3B3B] opacity-50" />
+          <h3 className="text-[#FF3B3B] font-bold uppercase tracking-widest text-xs mb-3 flex items-center gap-2">
+            <AlertCircle className="w-4 h-4 neon-glow-congested" /> Critical Bottlenecks
+          </h3>
+          <div className="flex flex-col gap-2">
+            {(data?.intersections || [])
+              .filter(n => (n.wait_time && n.wait_time > 0) || (n.queue_ns && n.queue_ns > 0) || (n.queue_ew && n.queue_ew > 0))
+              .sort((a, b) => (b.wait_time || 0) - (a.wait_time || 0))
+              .slice(0, 3)
+              .map((node, idx) => (
+                <div key={`bn-${node.id}`} 
+                     className="flex justify-between items-center bg-[#050A15]/80 hover:bg-white/10 cursor-pointer p-2.5 rounded-lg transition-colors border border-white/5"
+                     onClick={() => setSelectedNodeId(node.id)}>
+                  <div className="flex items-center gap-3">
+                    <div className="w-5 h-5 rounded bg-[#FF3B3B]/20 flex items-center justify-center border border-[#FF3B3B]/50 text-[#FF3B3B] font-black text-xs">
+                      {idx + 1}
+                    </div>
+                    <span className="text-white text-xs font-mono font-bold tracking-wider">NODE {node.id.toString().slice(-4)}</span>
+                  </div>
+                  <div className="flex flex-col items-end">
+                    <span className="text-[10px] text-slate-400 font-bold tracking-widest leading-none mb-1">WAIT TIME</span>
+                    <span className="text-[#FF3B3B] font-mono text-xs leading-none">{node.wait_time?.toFixed(1)}s</span>
+                  </div>
+                </div>
+              ))}
+              {(data?.intersections || []).filter(n => n.wait_time && n.wait_time > 0).length === 0 && (
+                <div className="text-center p-3 bg-black/40 rounded-lg text-slate-500 text-[10px] uppercase tracking-widest border border-white/5 line-through">
+                  No Anomalies Detected
+                </div>
+              )}
+          </div>
+        </div>
+
         {/* Node Override & Analytics */}
         {(() => {
            const sNode = data?.intersections?.find(n => n.id === selectedNodeId);
@@ -630,6 +665,37 @@ export default function Dashboard() {
                          <span className="text-[#00FFC6] font-mono text-xs">N/S: {sNode.q_values[0].toFixed(2)}</span>
                          <div className="w-px h-3 bg-white/20" />
                          <span className="text-[#FF00FF] font-mono text-xs">E/W: {sNode.q_values[1].toFixed(2)}</span>
+                       </div>
+                     </div>
+                   )}
+
+                   {/* Signal Analytics Readout */}
+                   {sNode.wait_time !== undefined && (
+                     <div className="mt-4 bg-[#050A15]/80 p-3.5 rounded-lg border border-white/10 relative overflow-hidden">
+                       {/* Decorative background grid */}
+                       <div className="absolute inset-0 opacity-[0.03] pointer-events-none" 
+                            style={{backgroundImage: 'radial-gradient(#ffffff 1px, transparent 1px)', backgroundSize: '8px 8px'}} />
+                            
+                       <p className="text-[10px] text-slate-400 mb-3 tracking-widest uppercase flex items-center gap-2 font-bold relative z-10">
+                         <Eye className="w-3.5 h-3.5 text-[#4CC9F0]" /> Live Signal Analytics
+                       </p>
+                       
+                       <div className="flex flex-col gap-2.5 relative z-10">
+                          <div className="flex justify-between items-center p-2 bg-black/50 rounded border border-white/5">
+                            <span className="text-[10px] font-bold text-slate-500 tracking-wider">ACCUMULATED WAIT</span>
+                            <span className="text-xs font-mono text-[#FF3B3B] font-bold">{sNode.wait_time.toFixed(1)}s</span>
+                          </div>
+                          
+                          <div className="grid grid-cols-2 gap-2">
+                            <div className="flex flex-col bg-black/50 p-2 rounded border border-white/5 border-l-2 border-l-[#00FFC6]">
+                              <span className="text-[9px] font-bold text-slate-500 tracking-widest mb-1">N/S QUEUE</span>
+                              <span className="text-sm font-mono text-[#00FFC6] font-black">{sNode.queue_ns}</span>
+                            </div>
+                            <div className="flex flex-col bg-black/50 p-2 rounded border border-white/5 border-l-2 border-l-[#FF00FF]">
+                              <span className="text-[9px] font-bold text-slate-500 tracking-widest mb-1">E/W QUEUE</span>
+                              <span className="text-sm font-mono text-[#FF00FF] font-black">{sNode.queue_ew}</span>
+                            </div>
+                          </div>
                        </div>
                      </div>
                    )}

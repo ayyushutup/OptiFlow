@@ -546,7 +546,8 @@ class RealSimManager:
                     "lon": next(n['lon'] for n in self.nodes if n['id'] == sid),
                     "q_values": s.get('q_values', [0, 0]),
                     "is_overridden": sid in self.overrides or getattr(self, 'evp_overrides', {}).get(sid) is not None,
-                    "is_evp": s.get('is_evp', False)
+                    "is_evp": s.get('is_evp', False),
+                    **self.env.get_signal_analytics(sid, self.vehicles)
                 } for sid, s in self.signals.items()
             ],
             "vehicles": [
